@@ -4,12 +4,12 @@ import (
 	"flag"
 	"fmt"
 	_ "golang.org/x/image/webp" // Add support for decoding webp
-	"os"
 	"log"
+	"os"
+	"scrape/kunmanga"
+	"scrape/manhuaus"
 	"sort"
 	"strings"
-	"scrape/manhuaus"
-	"scrape/kunmanga"
 )
 
 func main() {
@@ -77,7 +77,6 @@ func main() {
 		}
 
 		chapterURLs := kunmanga.KunMangaChapterUrls(*shortName)
-		outputDir := "downloads"
 
 		var filtered []Chapter
 
@@ -92,8 +91,22 @@ func main() {
 				continue
 			}
 
-			if chNum < *start || chNum > *end {
-				log.Printf("[MAIN] Skipping chapter %s (number %d): outside range %d-%d", chapterSlug, chNum, *start, *end)
+			// Only filter by range if both start and end are set
+			if *start != 0 && *end != 0 {
+				if chNum < *start || chNum > *end {
+					log.Printf("[MAIN] Skipping chapter %s (number %d): outside range %d-%d", chapterSlug, chNum, *start, *end)
+					continue
+				}
+			}
+
+			// Check if CBZ already exists
+			exists, err := kunmanga.CBZExists(chNum)
+			if err != nil {
+				log.Printf("[MAIN] Error checking CBZ for chapter %d: %v", chNum, err)
+				continue
+			}
+			if exists {
+				log.Printf("[MAIN] Skipping chapter %d: CBZ already exists", chNum)
 				continue
 			}
 
@@ -113,7 +126,7 @@ func main() {
 		for _, ch := range filtered {
 			//log.Printf("[MAIN] Starting download for chapter %s (number %d)", ch.Slug, ch.Number)
 			fmt.Printf("Downloading chapter %d (%s)...\n", ch.Number, ch.Slug)
-			err := kunmanga.DownloadKunMangaChapters(ch.URL, outputDir)
+			err := kunmanga.DownloadKunMangaChapters(ch.URL, ch.Number)
 			if err != nil {
 				log.Printf("[MAIN] Error downloading chapter %s: %v", ch.Slug, err)
 			}

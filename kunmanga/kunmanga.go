@@ -81,7 +81,9 @@ func KunMangaChapterUrls(mangaName string) []string {
 
 // DownloadKunMangaChapters downloads chapter images to temp, zips to CBZ, cleans up.
 // Returns error on failure.
-func DownloadKunMangaChapters(url, outputDir string) error {
+// DownloadKunMangaChapters downloads chapter images to temp, zips to CBZ, cleans up.
+// Saves CBZ as ch<num>.cbz in current directory. Returns error on failure.
+func DownloadKunMangaChapters(url string, chapterNumber int) error {
 	tempDir := filepath.Join(os.TempDir(), "chapter-dl")
 	chapterSlug := filepath.Base(strings.Trim(url, "/"))
 	chapterTempDir := filepath.Join(tempDir, chapterSlug)
@@ -118,7 +120,6 @@ func DownloadKunMangaChapters(url, outputDir string) error {
 
 	if len(imageURLs) == 0 {
 		log.Printf("[WARN] No images found for chapter %s", chapterSlug)
-		// Proceed or return error? Returning error here:
 		return errors.New("no images found on chapter page")
 	}
 
@@ -140,21 +141,20 @@ func DownloadKunMangaChapters(url, outputDir string) error {
 
 		if lastErr != nil {
 			log.Printf("[ERROR] Giving up on image %s after 3 attempts: %v", imgURL, lastErr)
-			// Depending on your needs, you can choose to continue or return error here.
-			// For example, continue downloading others:
-			// continue
 			return fmt.Errorf("failed to download image %s: %w", imgURL, lastErr)
 		}
 	}
 
-	// Create output directory
-	err = os.MkdirAll(outputDir, 0755)
-	if err != nil {
-		return fmt.Errorf("[ERROR] Failed to create output directory %s: %w", outputDir, err)
+	// Create CBZ file as ch<num>.cbz in current directory
+	outputDir := "."
+	var cbzName string
+	if chapterNumber < 10 {
+		cbzName = fmt.Sprintf("ch%02d.cbz", chapterNumber)
+	} else {
+		cbzName = fmt.Sprintf("ch%d.cbz", chapterNumber)
 	}
+	cbzPath := filepath.Join(outputDir, cbzName)
 
-	// Create CBZ file
-	cbzPath := filepath.Join(outputDir, chapterSlug+".cbz")
 	err = createCBZFromDir(cbzPath, chapterTempDir)
 	if err != nil {
 		return fmt.Errorf("[ERROR] Failed to create CBZ %s: %w", cbzPath, err)
@@ -245,4 +245,28 @@ func ParseChapterNumber(slug string) int {
 		return 0
 	}
 	return n
+}
+
+// CBZExists checks if ch<num>.cbz already exists in current directory.
+// Returns true if exists, false otherwise. Returns error if unexpected.
+func CBZExists(chapterNumber int) (bool, error) {
+	var cbzName string
+	if chapterNumber < 10 {
+		cbzName = fmt.Sprintf("ch%02d.cbz", chapterNumber)
+	} else {
+		cbzName = fmt.Sprintf("ch%d.cbz", chapterNumber)
+	}
+	cbzPath := filepath.Join(".", cbzName)
+
+	_, err := os.Stat(cbzPath)
+	if err == nil {
+		// File exists
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		// File does not exist
+		return false, nil
+	}
+	// Other unexpected error
+	return false, err
 }
