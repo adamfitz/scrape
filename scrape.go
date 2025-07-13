@@ -139,13 +139,22 @@ func main() {
 			}
 		}
 	case "xbato":
-		chapterList, err := xbato.XbatoChapterUrls(*shortName)
+		chapterUrls, err := xbato.XbatoChapterUrls(*shortName)
 		if err != nil {
 			fmt.Printf("%s\nError retrieving chapter list from %s", err, *siteName)
 			os.Exit(1)
 		}
-		for _, element := range chapterList {
-			fmt.Println(element)
+
+		// grab the list of chapters from the
+		chapterMap, err := xbato.ChapterOptions(chapterUrls[0])
+		if err != nil {
+			fmt.Println("error retrieving chapterMap from url: ", err)
+			os.Exit(1)
 		}
+		// format the chapter names
+		formattedChapterMap := xbato.FormatChapterMap(chapterMap)
+
+		// download the chapters
+		xbato.DownloadAndCreateCBZ(chapterUrls, formattedChapterMap)
 	}
 }
