@@ -8,6 +8,7 @@ import (
 	"os"
 	"scrape/kunmanga"
 	"scrape/manhuaus"
+	"scrape/xbato"
 	"sort"
 	"strings"
 )
@@ -15,7 +16,7 @@ import (
 func main() {
 	siteName := flag.String("site", "", "name of website")
 	urlFlag := flag.String("url", "", "Chapter URL to scrape (required)")
-	shortName := flag.String("shortname", "", "Kunmanga shortname is required")
+	shortName := flag.String("shortname", "", "Kunmanga/Xbato shortname is required")
 	start := flag.Int("start", 0, "Start chapter number (optional)")
 	end := flag.Int("end", 0, "End chapter number (optional)")
 	flag.Parse()
@@ -27,6 +28,12 @@ func main() {
 	}
 
 	if *shortName == "" && *siteName == "kunmanga" {
+		fmt.Println("Error: --shortname flag is required")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if *shortName == "" && *siteName == "xbato" {
 		fmt.Println("Error: --shortname flag is required")
 		flag.Usage()
 		os.Exit(1)
@@ -130,6 +137,15 @@ func main() {
 			if err != nil {
 				log.Printf("[MAIN] Error downloading chapter %s: %v", ch.Slug, err)
 			}
+		}
+	case "xbato":
+		chapterList, err := xbato.XbatoChapterUrls(*shortName)
+		if err != nil {
+			fmt.Printf("%s\nError retrieving chapter list from %s", err, *siteName)
+			os.Exit(1)
+		}
+		for _, element := range chapterList {
+			fmt.Println(element)
 		}
 	}
 }
