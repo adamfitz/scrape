@@ -16,9 +16,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"scrape/parser"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,6 +61,7 @@ func extractChapterNumber(href string) string {
 func DownloadChapters(chapterURLs []string) error {
 	chapterMap := make(map[string]string)
 
+	fmt.Println("Retrieving chapter list...")
 	for _, url := range chapterURLs {
 		chapterNum := extractChapterNumber(url)
 		if chapterNum == "" {
@@ -67,6 +70,23 @@ func DownloadChapters(chapterURLs []string) error {
 			continue
 		}
 		chapterMap[chapterNum] = url
+	}
+
+	// get a list of the chapter in the current directory
+	downloadedChapters, err := parser.FileList(".")
+	if err != nil {
+		log.Fatalf("error getting file list: %v", err)
+	}
+
+	for _, chName := range downloadedChapters {
+		// split filename and remove .cbz extension
+		splitFileName := strings.Split(chName, ".")
+
+		// remove chapter number from the chapter map if it is already downloaded
+		if _, ok := chapterMap[splitFileName[0]]; ok {
+			delete(chapterMap, splitFileName[0])
+			log.Printf("%s already downloaded,removed %s from chapterMap", splitFileName[0], splitFileName[0])
+		}
 	}
 
 	// Sort keys for consistent ordering
@@ -78,6 +98,8 @@ func DownloadChapters(chapterURLs []string) error {
 
 	for _, chapterNum := range keys {
 		chapterURL := chapterMap[chapterNum]
+
+		fmt.Println("Starting download for chapter: ", chapterNum)
 
 		tmpDir, err := os.MkdirTemp("", "chapter-"+chapterNum)
 		if err != nil {
@@ -97,7 +119,7 @@ func DownloadChapters(chapterURLs []string) error {
 		if err := chromedp.Run(ctx,
 			chromedp.Navigate(chapterURL),
 			chromedp.WaitReady("body", chromedp.ByQuery),
-			chromedp.Sleep(2*time.Second),
+			chromedp.Sleep(1*time.Second/2), // sleep 500ms?
 			chromedp.OuterHTML("html", &html),
 		); err != nil {
 			log.Printf("chromedp navigation failed for %s: %v", chapterURL, err)
@@ -113,6 +135,7 @@ func DownloadChapters(chapterURLs []string) error {
 			continue
 		}
 
+		fmt.Printf("Starting download of chapter %s images...\n", chapterNum)
 		var imgPaths []string
 		for i, match := range matches {
 			imgURL := match[1]
@@ -135,18 +158,28 @@ func DownloadChapters(chapterURLs []string) error {
 				continue
 			}
 
-			resp, err := http.Get(imgURL)
+			// remove erroneous chars  like \n
+			cleanedURL := strings.ReplaceAll(imgURL, "\n", "")
+			cleanedURL = strings.TrimSpace(cleanedURL)
+			// validate URL before trying to use it
+			_, err := url.ParseRequestURI(cleanedURL)
 			if err != nil {
-				log.Printf("Failed to download image %s: %v", imgURL, err)
-				fmt.Printf("Failed to download image %s: %v", imgURL, err)
+				log.Printf("Invalid URL: %s → %v", cleanedURL, err)
+				return err
+			}
+
+			resp, err := http.Get(cleanedURL)
+			if err != nil {
+				log.Printf("Failed to download image %s: %v", cleanedURL, err)
+				fmt.Printf("Failed to download image %s: %v", cleanedURL, err)
 				continue
 			}
 
 			img, _, err := image.Decode(resp.Body)
 			resp.Body.Close()
 			if err != nil {
-				log.Printf("Failed to decode image %s: %v", imgURL, err)
-				fmt.Printf("Failed to decode image %s: %v", imgURL, err)
+				log.Printf("Failed to decode image %s: %v", cleanedURL, err)
+				fmt.Printf("Failed to decode image %s: %v", cleanedURL, err)
 				continue
 			}
 
@@ -180,7 +213,7 @@ func DownloadChapters(chapterURLs []string) error {
 		}
 
 		log.Printf("Chapter %s downloaded and saved as %s", chapterNum, cbzName)
-		fmt.Printf("Chapter %s downloaded and saved as %s", chapterNum, cbzName)
+		fmt.Printf("Chapter %s downloaded and saved as %s\n", chapterNum, cbzName)
 	}
 
 	return nil

@@ -172,8 +172,5 @@ func main() {
 			log.Fatalf("Get Chapter URls failed: %v", err)
 		}
 		iluim.DownloadChapters(chapterUrls)
-		//for _, url := range chapterUrls{
-		//	fmt.Println("Chapter URL:", url)
-		//}
 	}
 }
