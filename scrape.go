@@ -6,6 +6,7 @@ import (
 	_ "golang.org/x/image/webp" // Add support for decoding webp
 	"log"
 	"os"
+	"scrape/iluim"
 	"scrape/kunmanga"
 	"scrape/manhuaus"
 	"scrape/xbato"
@@ -156,5 +157,15 @@ func main() {
 
 		// download the chapters
 		xbato.DownloadAndCreateCBZ(chapterUrls, formattedChapterMap)
+	case "iluim":
+		log.Println("Starting iluim scraper...")
+		chapterUrls, err := iluim.ChapterURLs("https://infinitelevelup.com/")
+		if err != nil {
+			log.Fatalf("Get Chapter URls failed: %v", err)
+		}
+		iluim.DownloadChapters(chapterUrls)
+		//for _, url := range chapterUrls{
+		//	fmt.Println("Chapter URL:", url)
+		//}
 	}
 }
