@@ -116,6 +116,25 @@ func DownloadChapters(chapterURLs []string) error {
 		var imgPaths []string
 		for i, match := range matches {
 			imgURL := match[1]
+			lowerURL := strings.ToLower(imgURL)
+
+			// Skip common icon or social media domains or filenames
+			skip := false
+			skipPatterns := []string{
+				"facebook", "twitter", "linkedin", "pinterest",
+				"icon", "favicon", "logo", "sprite", "social", "avatar",
+			}
+			for _, pattern := range skipPatterns {
+				if strings.Contains(lowerURL, pattern) {
+					log.Printf("Skipping unwanted image: %s", imgURL)
+					skip = true
+					break
+				}
+			}
+			if skip {
+				continue
+			}
+
 			resp, err := http.Get(imgURL)
 			if err != nil {
 				log.Printf("Failed to download image %s: %v", imgURL, err)
