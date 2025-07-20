@@ -88,26 +88,53 @@ func ChapterOptions(chapterURL string) (map[string]string, error) {
 func FormatChapterMap(chapters map[string]string) map[string]string {
 	formatted := make(map[string]string)
 
-	re := regexp.MustCompile(`\d+`)
+	// Matches volume and chapter numbers, including decimals
+	volChapRegex := regexp.MustCompile(`(?i)volume\s*(\d+)[^\d]*chapter\s*(\d+(?:\.\d+)?)`)
+	chapOnlyRegex := regexp.MustCompile(`(?i)chapter\s*(\d+(?:\.\d+)?)`)
 
 	for id, text := range chapters {
-		matches := re.FindAllString(text, -1)
-		if len(matches) > 0 {
-			chNum := matches[0]
-			if len(chNum) == 1 {
-				chNum = fmt.Sprintf("0%s", chNum)
+		normalized := strings.ToLower(text)
+
+		if matches := volChapRegex.FindStringSubmatch(normalized); len(matches) == 3 {
+			vol := matches[1]
+			ch := matches[2]
+
+			// Pad volume
+			if len(vol) == 1 {
+				vol = "0" + vol
 			}
-			formatted[id] = fmt.Sprintf("ch%s", chNum)
-		} else {
-			// fallback in case no number found
-			formatted[id] = strings.ReplaceAll(strings.ToLower(text), " ", "_")
+
+			// Pad chapter left of dot (e.g., 3.5 → 03.5)
+			if parts := strings.Split(ch, "."); len(parts) > 1 && len(parts[0]) == 1 {
+				ch = "0" + ch
+			} else if len(ch) == 1 {
+				ch = "0" + ch
+			}
+
+			formatted[id] = fmt.Sprintf("vol%sch%s", vol, ch)
+			continue
 		}
+
+		if matches := chapOnlyRegex.FindStringSubmatch(normalized); len(matches) == 2 {
+			ch := matches[1]
+
+			if parts := strings.Split(ch, "."); len(parts) > 1 && len(parts[0]) == 1 {
+				ch = "0" + ch
+			} else if len(ch) == 1 {
+				ch = "0" + ch
+			}
+
+			formatted[id] = fmt.Sprintf("ch%s", ch)
+			continue
+		}
+
+		// fallback: use raw text
+		formatted[id] = strings.ReplaceAll(normalized, " ", "_")
 	}
 
 	return formatted
 }
 
-// Creates a CBZ file
 // Creates a CBZ file
 func createCbz(sourceDir, zipName string) error {
 	// Ensure zipName ends with .cbz

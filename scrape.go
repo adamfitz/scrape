@@ -160,11 +160,13 @@ func main() {
 			fmt.Println("error retrieving chapterMap from url: ", err)
 			os.Exit(1)
 		}
+
 		// format the chapter names
 		formattedChapterMap := xbato.FormatChapterMap(chapterMap)
 
 		// download the chapters
 		xbato.DownloadAndCreateCBZ(chapterUrls, formattedChapterMap)
+
 	case "iluim":
 		log.Println("Starting iluim scraper...")
 		chapterUrls, err := iluim.ChapterURLs("https://infinitelevelup.com/")
