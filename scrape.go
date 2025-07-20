@@ -6,16 +6,26 @@ import (
 	_ "golang.org/x/image/webp" // Add support for decoding webp
 	"log"
 	"os"
+	"scrape/iluim"
 	"scrape/kunmanga"
 	"scrape/manhuaus"
+	"scrape/xbato"
 	"sort"
 	"strings"
 )
 
+func init() {
+	logFile, err := os.OpenFile("scrape.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Failed to open log file: %v", err)
+	}
+	log.SetOutput(logFile)
+}
+
 func main() {
 	siteName := flag.String("site", "", "name of website")
 	urlFlag := flag.String("url", "", "Chapter URL to scrape (required)")
-	shortName := flag.String("shortname", "", "Kunmanga shortname is required")
+	shortName := flag.String("shortname", "", "Kunmanga/Xbato shortname is required")
 	start := flag.Int("start", 0, "Start chapter number (optional)")
 	end := flag.Int("end", 0, "End chapter number (optional)")
 	flag.Parse()
@@ -27,6 +37,12 @@ func main() {
 	}
 
 	if *shortName == "" && *siteName == "kunmanga" {
+		fmt.Println("Error: --shortname flag is required")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if *shortName == "" && *siteName == "xbato" {
 		fmt.Println("Error: --shortname flag is required")
 		flag.Usage()
 		os.Exit(1)
@@ -131,5 +147,30 @@ func main() {
 				log.Printf("[MAIN] Error downloading chapter %s: %v", ch.Slug, err)
 			}
 		}
+	case "xbato":
+		chapterUrls, err := xbato.XbatoChapterUrls(*shortName)
+		if err != nil {
+			fmt.Printf("%s\nError retrieving chapter list from %s", err, *siteName)
+			os.Exit(1)
+		}
+
+		// grab the list of chapters from the
+		chapterMap, err := xbato.ChapterOptions(chapterUrls[0])
+		if err != nil {
+			fmt.Println("error retrieving chapterMap from url: ", err)
+			os.Exit(1)
+		}
+		// format the chapter names
+		formattedChapterMap := xbato.FormatChapterMap(chapterMap)
+
+		// download the chapters
+		xbato.DownloadAndCreateCBZ(chapterUrls, formattedChapterMap)
+	case "iluim":
+		log.Println("Starting iluim scraper...")
+		chapterUrls, err := iluim.ChapterURLs("https://infinitelevelup.com/")
+		if err != nil {
+			log.Fatalf("Get Chapter URls failed: %v", err)
+		}
+		iluim.DownloadChapters(chapterUrls)
 	}
 }
