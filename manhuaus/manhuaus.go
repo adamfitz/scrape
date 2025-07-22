@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -217,39 +216,4 @@ func ExtractChapterNumber(url string) (string, error) {
 	}
 
 	return fmt.Sprintf("ch%03d.cbz", num), nil
-}
-
-// SortAndFilterChapters sorts and filters chapter URLs by optional start and end chapter numbers.
-func SortAndFilterChapters(urls []string, start, end int) ([]string, error) {
-	var chapters []ChapterInfo
-
-	for _, u := range urls {
-		chNumStr, err := ExtractChapterNumber(u)
-		if err != nil {
-			continue // Skip if no chapter number found
-		}
-		chNum, err := strconv.Atoi(chNumStr)
-		if err != nil {
-			continue
-		}
-		chapters = append(chapters, ChapterInfo{URL: u, ChapterNum: chNum})
-	}
-
-	if len(chapters) == 0 {
-		return nil, fmt.Errorf("no valid chapters found to sort")
-	}
-
-	sort.Slice(chapters, func(i, j int) bool {
-		return chapters[i].ChapterNum < chapters[j].ChapterNum
-	})
-
-	var filtered []string
-	for _, chap := range chapters {
-		if (start == 0 || chap.ChapterNum >= start) &&
-			(end == 0 || chap.ChapterNum <= end) {
-			filtered = append(filtered, chap.URL)
-		}
-	}
-
-	return filtered, nil
 }

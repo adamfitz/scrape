@@ -65,16 +65,9 @@ func main() {
 			os.Exit(1)
 		}
 
-		// remove any chapters that have already been downloaded (if they are in teh current dir)
+		// remove any chapters that have already been downloaded (if they are in the current dir)
 		toDownload := parser.FilterUndownloadedChapters(chapterList)
 
-		/*
-			sortedChapters, err := manhuaus.SortAndFilterChapters(toDownload, *start, *end)
-			if err != nil {
-				fmt.Printf("%s\nError sorting chapter list", err)
-				os.Exit(1)
-			}
-		*/
 		totalChapters := len(toDownload)
 		fmt.Println("Downloading", totalChapters, "chapters")
 
