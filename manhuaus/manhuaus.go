@@ -3,7 +3,9 @@ package manhuaus
 import (
 	"archive/zip"
 	"fmt"
+	"image"
 	"image/jpeg"
+	"image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -27,7 +29,6 @@ type ChapterInfo struct {
 
 // Download chapter images and create cbz file
 func DownloadChaper(chapterURL string) error {
-	// Create temp directory
 	tmpDir, err := os.MkdirTemp("", "manga_chapter")
 	if err != nil {
 		return err
@@ -39,7 +40,6 @@ func DownloadChaper(chapterURL string) error {
 	var imgURLs []string
 	var chapterValue string
 
-	// Extract chapter value
 	c.OnHTML("input#wp-manga-current-chap", func(e *colly.HTMLElement) {
 		val := strings.TrimSpace(e.Attr("value"))
 		if val != "" {
@@ -68,7 +68,7 @@ func DownloadChaper(chapterURL string) error {
 
 	fmt.Println("Found", len(imgURLs), "images. Downloading and converting to JPG...")
 
-	ticker := time.NewTicker(1500 * time.Millisecond) // 1 request every 1.5 sec
+	ticker := time.NewTicker(1500 * time.Millisecond)
 	defer ticker.Stop()
 
 	client := webClient.NewHTTPClient()
@@ -86,9 +86,9 @@ func DownloadChaper(chapterURL string) error {
 			return err
 		}
 
-		img, err := webp.Decode(bytes.NewReader(bodyBytes))
+		img, err := DecodeImage(bodyBytes, url)
 		if err != nil {
-			return fmt.Errorf("failed to decode webp image %s: %v", url, err)
+			return err
 		}
 
 		fileName := fmt.Sprintf("page-%03d.jpg", i+1)
@@ -108,8 +108,28 @@ func DownloadChaper(chapterURL string) error {
 		fmt.Println("Saved:", fileName)
 	}
 
-	// Build CBZ file name
 	cbzFileName := fmt.Sprintf("ch%s.cbz", strings.TrimPrefix(chapterValue, "chapter-"))
+	if err := CreateCbzFile(tmpDir, cbzFileName); err != nil {
+		return err
+	}
+
+	fmt.Println("CBZ file created:", cbzFileName)
+	return nil
+}
+
+// DecodeImage detects the format (JPEG, PNG, WebP) and returns a decoded image.
+func DecodeImage(data []byte, sourceURL string) (image.Image, error) {
+	if len(data) >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+		return jpeg.Decode(bytes.NewReader(data))
+	}
+	if len(data) >= 8 && bytes.Equal(data[:8], []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'}) {
+		return png.Decode(bytes.NewReader(data))
+	}
+	return webp.Decode(bytes.NewReader(data))
+}
+
+// CreateCbzFile zips all the files from the tmpDir into cbzFileName.
+func CreateCbzFile(tmpDir, cbzFileName string) error {
 	cbzFile, err := os.Create(cbzFileName)
 	if err != nil {
 		return err
@@ -117,6 +137,7 @@ func DownloadChaper(chapterURL string) error {
 	defer cbzFile.Close()
 
 	zipWriter := zip.NewWriter(cbzFile)
+	defer zipWriter.Close()
 
 	files, err := os.ReadDir(tmpDir)
 	if err != nil {
@@ -143,12 +164,6 @@ func DownloadChaper(chapterURL string) error {
 		}
 	}
 
-	err = zipWriter.Close()
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("CBZ file created:", cbzFileName)
 	return nil
 }
 
