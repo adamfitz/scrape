@@ -246,27 +246,3 @@ func ParseChapterNumber(slug string) int {
 	}
 	return n
 }
-
-// CBZExists checks if ch<num>.cbz already exists in current directory.
-// Returns true if exists, false otherwise. Returns error if unexpected.
-func CBZExists(chapterNumber int) (bool, error) {
-	var cbzName string
-	if chapterNumber < 10 {
-		cbzName = fmt.Sprintf("ch%02d.cbz", chapterNumber)
-	} else {
-		cbzName = fmt.Sprintf("ch%d.cbz", chapterNumber)
-	}
-	cbzPath := filepath.Join(".", cbzName)
-
-	_, err := os.Stat(cbzPath)
-	if err == nil {
-		// File exists
-		return true, nil
-	}
-	if os.IsNotExist(err) {
-		// File does not exist
-		return false, nil
-	}
-	// Other unexpected error
-	return false, err
-}
