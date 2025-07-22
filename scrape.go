@@ -3,15 +3,18 @@ package main
 import (
 	"flag"
 	"fmt"
-	_ "golang.org/x/image/webp" // Add support for decoding webp
+	//"go/parser"
 	"log"
 	"os"
 	"scrape/iluim"
 	"scrape/kunmanga"
 	"scrape/manhuaus"
+	"scrape/parser"
 	"scrape/xbato"
 	"sort"
 	"strings"
+
+	_ "golang.org/x/image/webp" // Add support for decoding webp
 )
 
 func init() {
@@ -62,21 +65,27 @@ func main() {
 			os.Exit(1)
 		}
 
-		sortedChapters, err := manhuaus.SortAndFilterChapters(chapterList, *start, *end)
-		if err != nil {
-			fmt.Printf("%s\nError sorting chapter list", err)
-			os.Exit(1)
-		}
+		// remove any chapters that have already been downloaded (if they are in teh current dir)
+		toDownload := parser.FilterUndownloadedChapters(chapterList)
 
-		totalChapters := len(sortedChapters)
+		/*
+			sortedChapters, err := manhuaus.SortAndFilterChapters(toDownload, *start, *end)
+			if err != nil {
+				fmt.Printf("%s\nError sorting chapter list", err)
+				os.Exit(1)
+			}
+		*/
+		totalChapters := len(toDownload)
 		fmt.Println("Downloading", totalChapters, "chapters")
 
-		for _, chapter := range sortedChapters {
+		for _, chapter := range toDownload {
+
 			chNumber, err := manhuaus.ExtractChapterNumber(chapter)
 			if err != nil {
 				fmt.Printf("%s\nError extracting chapter number from URL", err)
 				continue
 			}
+			// check if teh chapter already exists or not
 			fmt.Println("Downloading chapter #", chNumber)
 			err = manhuaus.DownloadChaper(chapter)
 			if err != nil {
@@ -118,13 +127,13 @@ func main() {
 			}
 
 			// Check if CBZ already exists
-			exists, err := kunmanga.CBZExists(chNum)
+			exists, err := parser.CBZExists(chNum)
 			if err != nil {
-				log.Printf("[MAIN] Error checking CBZ for chapter %d: %v", chNum, err)
+				log.Printf("[MAIN] Kunmanga error checking CBZ for chapter %d: %v", chNum, err)
 				continue
 			}
 			if exists {
-				log.Printf("[MAIN] Skipping chapter %d: CBZ already exists", chNum)
+				log.Printf("[MAIN] Kunmanga skipping chapter %d: CBZ already exists", chNum)
 				continue
 			}
 

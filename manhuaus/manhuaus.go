@@ -193,14 +193,30 @@ func ChapterURLs(mangaURL string) ([]string, error) {
 	return chapterURLs, nil
 }
 
-// ExtractChapterNumber extracts the chapter number the gin URL
+// ExtractChapterNumber extracts and formats the chapter number from the URL.
 func ExtractChapterNumber(url string) (string, error) {
-	re := regexp.MustCompile(`chapter-(\d+)`)
+	re := regexp.MustCompile(`chapter-([\d.]+)`)
 	match := re.FindStringSubmatch(url)
-	if len(match) >= 2 {
-		return match[1], nil
+	if len(match) < 2 {
+		return "", fmt.Errorf("chapter number not found in URL")
 	}
-	return "", fmt.Errorf("chapter number not found in URL")
+
+	raw := match[1]
+	if strings.Contains(raw, ".") {
+		parts := strings.SplitN(raw, ".", 2)
+		intPart, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return "", fmt.Errorf("invalid integer part in chapter number: %v", err)
+		}
+		return fmt.Sprintf("ch%03d.%s.cbz", intPart, parts[1]), nil
+	}
+
+	num, err := strconv.Atoi(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid chapter number: %v", err)
+	}
+
+	return fmt.Sprintf("ch%03d.cbz", num), nil
 }
 
 // SortAndFilterChapters sorts and filters chapter URLs by optional start and end chapter numbers.
