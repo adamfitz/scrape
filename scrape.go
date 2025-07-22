@@ -102,10 +102,12 @@ func main() {
 			chapterSlug := parts[len(parts)-1]
 
 			chNum := kunmanga.ParseChapterNumber(chapterSlug)
-			if chNum == 0 {
+			/* I dont think this is needed as regardless of the number all chapter links are required.
+			if chNum < 0 { // sometimes there is a chapter-0 eg: prologue etc, so we want to start at zero
 				log.Printf("[MAIN] Skipping invalid chapter slug: %s", chapterSlug)
 				continue
 			}
+			*/
 
 			// Only filter by range if both start and end are set
 			if *start != 0 && *end != 0 {

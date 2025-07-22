@@ -50,7 +50,7 @@ func downloadKunMangaImage(imgURL, outputPath string, referer string) error {
 
 // mangaName is the name of the manga from the url eg:
 // From: https://kunmanga.com/manga/ugly-complex/
-// the mangaNmae will be the string "ugly-complex"
+// the mangaName will be the string "ugly-complex"
 func KunMangaChapterUrls(mangaName string) []string {
 
 	baseUrl := "https://kunmanga.com/manga"
