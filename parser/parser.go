@@ -1,7 +1,9 @@
 package parser
 
 import (
+	"archive/zip"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -98,4 +100,50 @@ func FilterUndownloadedChapters(chapterStrs []string) []string {
 	}
 
 	return filtered
+}
+
+// generic func to create CBZ file from a dir path and providing the chapter/manga name
+func CreateCBZ(dirPath string, outputFilename string) error {
+	outFile, err := os.Create(outputFilename)
+	if err != nil {
+		return fmt.Errorf("unable to create output CBZ file: %v", err)
+	}
+	defer outFile.Close()
+
+	zipWriter := zip.NewWriter(outFile)
+	defer zipWriter.Close()
+
+	err = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(dirPath, path)
+		if err != nil {
+			return err
+		}
+
+		fw, err := zipWriter.Create(relPath)
+		if err != nil {
+			return err
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		_, err = io.Copy(fw, file)
+		return err
+	})
+
+	if err != nil {
+		return fmt.Errorf("error creating CBZ archive: %v", err)
+	}
+
+	return nil
 }

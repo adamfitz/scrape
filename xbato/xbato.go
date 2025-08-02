@@ -4,6 +4,7 @@ package xbato
 import (
 	"archive/zip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/chromedp/chromedp"
 	"github.com/gocolly/colly"
@@ -275,4 +277,17 @@ func GetChapterImageUrls(url string) ([]string, error) {
 	}
 
 	return urls, nil
+}
+
+// verifies the provided shortname is all digits (the default for xbato titles)
+func ShortNameVerify(shortName string) error {
+
+	// not required to check if the string is empty becuase the flag parsing already does
+	for _, element := range shortName {
+		if !unicode.IsDigit(element) {
+			return errors.New("xbato shortname must contain digtits only")
+		}
+	}
+
+	return nil
 }

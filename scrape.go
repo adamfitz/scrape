@@ -152,9 +152,21 @@ func main() {
 			}
 		}
 	case "xbato":
+		// shortname must be digits only
+		if err := xbato.ShortNameVerify(*shortName); err != nil {
+			fmt.Printf("Error: %s\n", err)
+			os.Exit(1)
+		}
+
 		chapterUrls, err := xbato.XbatoChapterUrls(*shortName)
 		if err != nil {
 			fmt.Printf("%s\nError retrieving chapter list from %s", err, *siteName)
+			os.Exit(1)
+		}
+
+		// check if the links to the chapters is returned correctly
+		if len(chapterUrls) == 0 {
+			fmt.Printf("No chapters found for series \"%s\" — check if the shortname is correct or if the page has changed.\n", *shortName)
 			os.Exit(1)
 		}
 
