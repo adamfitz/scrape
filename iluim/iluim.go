@@ -79,13 +79,13 @@ func DownloadChapters(chapterURLs []string) error {
 	}
 
 	for _, chName := range downloadedChapters {
-		// split filename and remove .cbz extension
-		splitFileName := strings.Split(chName, ".")
+		// trim ext instead of split so it does not remove the in between chapters eg .5 .6 etc
+		baseName := strings.TrimSuffix(chName, ".cbz")
 
 		// remove chapter number from the chapter map if it is already downloaded
-		if _, ok := chapterMap[splitFileName[0]]; ok {
-			delete(chapterMap, splitFileName[0])
-			log.Printf("%s already downloaded,removed %s from chapterMap", splitFileName[0], splitFileName[0])
+		if _, ok := chapterMap[baseName]; ok {
+			delete(chapterMap, baseName)
+			log.Printf("%s already downloaded, removed from chapterMap", baseName)
 		}
 	}
 
