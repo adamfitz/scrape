@@ -7,6 +7,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,7 +28,7 @@ type ChapterInfo struct {
 }
 
 // Download chapter images and create cbz file
-func DownloadChaper(chapterURL string) error {
+func DownloadChaper(chapterURL, cbzFileName string) error {
 	tmpDir, err := os.MkdirTemp("", "manga_chapter")
 	if err != nil {
 		return err
@@ -53,8 +54,7 @@ func DownloadChaper(chapterURL string) error {
 		}
 	})
 
-	err = c.Visit(chapterURL)
-	if err != nil {
+	if err := c.Visit(chapterURL); err != nil {
 		return err
 	}
 
@@ -65,7 +65,7 @@ func DownloadChaper(chapterURL string) error {
 		return fmt.Errorf("chapter value not found")
 	}
 
-	fmt.Println("Found", len(imgURLs), "images. Downloading and converting to JPG...")
+	fmt.Printf("Found %d images. Downloading and converting to JPG...\n", len(imgURLs))
 
 	ticker := time.NewTicker(1500 * time.Millisecond)
 	defer ticker.Stop()
@@ -77,17 +77,24 @@ func DownloadChaper(chapterURL string) error {
 
 		req, err := webClient.NewImageRequest(url, chapterURL)
 		if err != nil {
-			return fmt.Errorf("failed to create request for %s: %v", url, err)
+			fmt.Printf("⚠️ Failed to create request for %s: %v\n", url, err)
+			continue
 		}
 
 		bodyBytes, err := webClient.FetchImageBytes(client, req)
 		if err != nil {
-			return err
+			fmt.Printf("⚠️ chapter %s: failed to fetch image %s: %v\n", chapterValue, url, err)
+			continue
 		}
 
 		img, err := DecodeImage(bodyBytes, url)
 		if err != nil {
-			return err
+			fmt.Printf("⚠️ chapter %s: failed to decode image %s: %v\n", chapterValue, url, err)
+			continue
+		}
+		if img == nil {
+			fmt.Printf("⚠️ chapter %s: skipped image %s (decode returned nil)\n", chapterValue, url)
+			continue
 		}
 
 		fileName := fmt.Sprintf("page-%03d.jpg", i+1)
@@ -95,19 +102,21 @@ func DownloadChaper(chapterURL string) error {
 
 		outFile, err := os.Create(filePath)
 		if err != nil {
-			return fmt.Errorf("failed to create file %s: %v", filePath, err)
+			fmt.Printf("⚠️ failed to create file %s: %v\n", filePath, err)
+			continue
 		}
 
 		err = jpeg.Encode(outFile, img, &jpeg.Options{Quality: 90})
 		outFile.Close()
 		if err != nil {
-			return fmt.Errorf("failed to save image %s: %v", url, err)
+			fmt.Printf("⚠️ failed to save image %s: %v\n", url, err)
+			continue
 		}
 
 		fmt.Println("Saved:", fileName)
 	}
 
-	cbzFileName := fmt.Sprintf("ch%s.cbz", strings.TrimPrefix(chapterValue, "chapter-"))
+	log.Printf("Writing CBZ to: %s\n", cbzFileName)
 	if err := CreateCbzFile(tmpDir, cbzFileName); err != nil {
 		return err
 	}
@@ -118,13 +127,58 @@ func DownloadChaper(chapterURL string) error {
 
 // DecodeImage detects the format (JPEG, PNG, WebP) and returns a decoded image.
 func DecodeImage(data []byte, sourceURL string) (image.Image, error) {
-	if len(data) >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
-		return jpeg.Decode(bytes.NewReader(data))
+	if len(data) < 12 {
+		fmt.Printf("⚠️ Skipping image %s — too small (%d bytes)\n", sourceURL, len(data))
+		return nil, nil
 	}
-	if len(data) >= 8 && bytes.Equal(data[:8], []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'}) {
-		return png.Decode(bytes.NewReader(data))
+
+	// Detect HTML masquerading as image
+	if bytes.Contains(data[:min(512, len(data))], []byte("<html")) {
+		fmt.Printf("⚠️ Skipping image %s — looks like HTML content, not an image\n", sourceURL)
+		return nil, nil
 	}
-	return webp.Decode(bytes.NewReader(data))
+
+	header := data[:min(16, len(data))]
+
+	switch {
+	case len(data) >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF:
+		fmt.Println("Detected image format: JPEG")
+		img, err := jpeg.Decode(bytes.NewReader(data))
+		if err != nil {
+			fmt.Printf("❌ Failed to decode JPEG from %s: %v\n", sourceURL, err)
+			return nil, nil
+		}
+		return img, nil
+
+	case len(data) >= 8 && bytes.Equal(data[:8], []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'}):
+		fmt.Println("Detected image format: PNG")
+		img, err := png.Decode(bytes.NewReader(data))
+		if err != nil {
+			fmt.Printf("❌ Failed to decode PNG from %s: %v\n", sourceURL, err)
+			return nil, nil
+		}
+		return img, nil
+
+	case len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP":
+		fmt.Println("Detected image format: WebP")
+		img, err := webp.Decode(bytes.NewReader(data))
+		if err != nil {
+			fmt.Printf("❌ Failed to decode WebP from %s: %v\n", sourceURL, err)
+			return nil, nil
+		}
+		return img, nil
+
+	default:
+		fmt.Printf("❌ Unknown image format from %s\nHeader: %x\n", sourceURL, header)
+		return nil, nil
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // CreateCbzFile zips all the files from the tmpDir into cbzFileName.
