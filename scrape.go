@@ -56,7 +56,6 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
-
 	switch *siteName { // MUST dereference pointer before comparison in swtich
 	case "manhuaus":
 		chapterList, err := manhuaus.ChapterURLs(*urlFlag)
@@ -80,7 +79,8 @@ func main() {
 			}
 			// check if teh chapter already exists or not
 			fmt.Println("Downloading chapter #", chNumber)
-			err = manhuaus.DownloadChaper(chapter)
+			err = manhuaus.DownloadChaper(chapter, chNumber)
+
 			if err != nil {
 				fmt.Printf("%s\nError downloading chapter number: %s", err, chapter)
 				os.Exit(1)

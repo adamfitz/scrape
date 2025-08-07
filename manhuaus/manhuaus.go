@@ -7,6 +7,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,7 +28,7 @@ type ChapterInfo struct {
 }
 
 // Download chapter images and create cbz file
-func DownloadChaper(chapterURL string) error {
+func DownloadChaper(chapterURL, cbzFileName string) error {
 	tmpDir, err := os.MkdirTemp("", "manga_chapter")
 	if err != nil {
 		return err
@@ -107,7 +108,7 @@ func DownloadChaper(chapterURL string) error {
 		fmt.Println("Saved:", fileName)
 	}
 
-	cbzFileName := fmt.Sprintf("ch%s.cbz", strings.TrimPrefix(chapterValue, "chapter-"))
+	log.Printf("Writing CBZ to: %s\n", cbzFileName)
 	if err := CreateCbzFile(tmpDir, cbzFileName); err != nil {
 		return err
 	}
