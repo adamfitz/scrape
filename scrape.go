@@ -3,12 +3,14 @@ package main
 import (
 	"flag"
 	"fmt"
+
 	//"go/parser"
 	"log"
 	"os"
 	"scrape/iluim"
 	"scrape/kunmanga"
 	"scrape/manhuaus"
+	"scrape/orv"
 	"scrape/parser"
 	"scrape/xbato"
 	"sort"
@@ -178,5 +180,10 @@ func main() {
 			log.Fatalf("Get Chapter URls failed: %v", err)
 		}
 		iluim.DownloadChapters(chapterUrls)
+
+	case "orv":
+		log.Println("Starting download of missing ORV chapters...")
+		orv.DownloadMangaChapters()
+
 	}
 }
