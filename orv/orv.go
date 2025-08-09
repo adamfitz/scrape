@@ -151,7 +151,7 @@ func DownloadMangaChapters() {
 		chapterNum := strings.SplitN(chapter, ".", 2)
 		fmt.Println("Starting download for chapter: ", chapterNum[0])
 
-		// creat temp dir for image file download
+		// create temp dir for image file download
 		tmpDir, err := os.MkdirTemp("", "chapter-"+chapterNum[0])
 		if err != nil {
 			log.Printf("Failed to create temp dir for %s: %v", chapterNum, err)

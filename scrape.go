@@ -12,6 +12,7 @@ import (
 	"scrape/manhuaus"
 	"scrape/orv"
 	"scrape/parser"
+	"scrape/rizzfables"
 	"scrape/xbato"
 	"sort"
 	"strings"
@@ -36,6 +37,12 @@ func main() {
 	flag.Parse()
 
 	if *urlFlag == "" && *siteName == "manhuaus" {
+		fmt.Println("Error: --url flag is required")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if *urlFlag == "" && *siteName == "rizzfales" {
 		fmt.Println("Error: --url flag is required")
 		flag.Usage()
 		os.Exit(1)
@@ -172,7 +179,6 @@ func main() {
 
 		// download the chapters
 		xbato.DownloadAndCreateCBZ(chapterUrls, formattedChapterMap)
-
 	case "iluim":
 		log.Println("Starting iluim scraper...")
 		chapterUrls, err := iluim.ChapterURLs("https://infinitelevelup.com/")
@@ -180,10 +186,11 @@ func main() {
 			log.Fatalf("Get Chapter URls failed: %v", err)
 		}
 		iluim.DownloadChapters(chapterUrls)
-
 	case "orv":
 		log.Println("Starting download of missing ORV chapters...")
 		orv.DownloadMangaChapters()
-
+	case "rizzfables":
+		fmt.Println("Starting chapter download...")
+		rizzfables.DownloadMangaChapters(*urlFlag)
 	}
 }

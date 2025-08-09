@@ -147,7 +147,7 @@ func DownloadAndConvertToJPG(imageURL, targetDir string) error {
 		return fmt.Errorf("failed to read image data: %w", err)
 	}
 
-	format, err := detectImageFormat(imgBytes)
+	format, err := DetectImageFormat(imgBytes)
 	if err != nil {
 		return fmt.Errorf("failed to detect image format: %w", err)
 	}
@@ -206,7 +206,7 @@ func DownloadAndConvertToJPG(imageURL, targetDir string) error {
 }
 
 // detectImageFormat reads the magic bytes and returns the image format string (like "jpeg", "png", "webp")
-func detectImageFormat(data []byte) (string, error) {
+func DetectImageFormat(data []byte) (string, error) {
 	if len(data) < 12 {
 		return "", errors.New("data too short to determine format")
 	}
@@ -332,4 +332,15 @@ func CreateCbzFromDir(sourceDir, zipName string) error {
 	}
 
 	return nil
+}
+
+// filters out any non *.cbz file from the list
+func FilterCBZFiles(files []string) []string {
+	var filtered []string
+	for _, f := range files {
+		if strings.EqualFold(filepath.Ext(f), ".cbz") {
+			filtered = append(filtered, f)
+		}
+	}
+	return filtered
 }
