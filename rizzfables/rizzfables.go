@@ -81,9 +81,9 @@ func chapterURLs(mangaUrl string) (map[string]string, error) {
 		// Compose final chapter name string
 		var chName string
 		if fracPart != "" {
-			chName = fmt.Sprintf("%s.%s.cbz", paddedWhole, fracPart)
+			chName = fmt.Sprintf("ch%s.%s.cbz", paddedWhole, fracPart)
 		} else {
-			chName = fmt.Sprintf("%s.cbz", paddedWhole)
+			chName = fmt.Sprintf("ch%s.cbz", paddedWhole)
 		}
 
 		// Add to map
