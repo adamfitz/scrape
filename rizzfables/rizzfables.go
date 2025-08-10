@@ -229,7 +229,7 @@ func downloadAndConvertToJPG(imageURL, targetDir, chapterName string, imageIndex
 	}
 	defer outFile.Close()
 
-	opts := jpeg.Options{Quality: 90}
+	opts := jpeg.Options{Quality: 75} // the compression for the jpeg 75 == small file size, 90 == large file size
 	err = jpeg.Encode(outFile, img, &opts)
 	if err != nil {
 		return fmt.Errorf("failed to encode jpeg: %w", err)
