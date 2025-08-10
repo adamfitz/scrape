@@ -81,9 +81,9 @@ func chapterURLs(mangaUrl string) (map[string]string, error) {
 		// Compose final chapter name string
 		var chName string
 		if fracPart != "" {
-			chName = fmt.Sprintf("%s.%s.cbz", paddedWhole, fracPart)
+			chName = fmt.Sprintf("ch%s.%s.cbz", paddedWhole, fracPart)
 		} else {
-			chName = fmt.Sprintf("%s.cbz", paddedWhole)
+			chName = fmt.Sprintf("ch%s.cbz", paddedWhole)
 		}
 
 		// Add to map
@@ -229,7 +229,7 @@ func downloadAndConvertToJPG(imageURL, targetDir, chapterName string, imageIndex
 	}
 	defer outFile.Close()
 
-	opts := jpeg.Options{Quality: 90}
+	opts := jpeg.Options{Quality: 75} // the compression for the jpeg 75 == small file size, 90 == large file size
 	err = jpeg.Encode(outFile, img, &opts)
 	if err != nil {
 		return fmt.Errorf("failed to encode jpeg: %w", err)
