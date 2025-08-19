@@ -18,7 +18,7 @@ import (
 	"strings"
 
 	_ "image/gif" // register GIF decoder
-	_ "image/png" // register PNG decoder
+	"image/png"   // register PNG decoder
 
 	"github.com/chai2010/webp"
 	_ "golang.org/x/image/webp" // register WEBP decoder, add module
@@ -343,4 +343,73 @@ func FilterCBZFiles(files []string) []string {
 		}
 	}
 	return filtered
+}
+
+// returns a set of CBZ filenames found in the given directory
+func GetDownloadedCBZ(dir string) (map[string]bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	existing := make(map[string]bool)
+	for _, ent := range entries {
+		// only interested in files that end in .cbz
+		if !ent.IsDir() && strings.HasSuffix(ent.Name(), ".cbz") {
+			existing[ent.Name()] = true
+		}
+	}
+
+	return existing, nil
+}
+
+// detects the format (JPEG, PNG, WebP) and returns a decoded image in PNG format
+func DecodeImageToPng(data []byte, sourceURL string) (image.Image, error) {
+	if len(data) < 12 {
+		fmt.Printf("Skipping image %s — too small (%d bytes)\n", sourceURL, len(data))
+		return nil, nil
+	}
+
+	// Detect HTML masquerading as image
+	if bytes.Contains(data[:min(512, len(data))], []byte("<html")) {
+		fmt.Printf("Skipping image %s — looks like HTML content, not an image\n", sourceURL)
+		return nil, nil
+	}
+
+	header := data[:min(16, len(data))]
+	var img image.Image
+	var err error
+
+	switch {
+	case len(data) >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF:
+		log.Println("Detected image format: JPEG")
+		img, err = jpeg.Decode(bytes.NewReader(data))
+		if err != nil {
+			fmt.Printf("Failed to decode JPEG from %s: %v\n", sourceURL, err)
+			return nil, nil
+		}
+
+	case len(data) >= 8 && bytes.Equal(data[:8], []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'}):
+		log.Println("Detected image format: PNG")
+		img, err = png.Decode(bytes.NewReader(data))
+		if err != nil {
+			fmt.Printf("Failed to decode PNG from %s: %v\n", sourceURL, err)
+			return nil, nil
+		}
+
+	case len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP":
+		log.Println("Detected image format: WebP")
+		img, err = webp.Decode(bytes.NewReader(data))
+		if err != nil {
+			fmt.Printf("Failed to decode WebP from %s: %v\n", sourceURL, err)
+			return nil, nil
+		}
+
+	default:
+		fmt.Printf("Unknown image format from %s\nHeader: %x\n", sourceURL, header)
+		return nil, nil
+	}
+
+	// Return the image.Image for PNG saving
+	return img, nil
 }

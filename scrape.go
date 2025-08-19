@@ -7,6 +7,7 @@ import (
 	//"go/parser"
 	"log"
 	"os"
+	"scrape/hls"
 	"scrape/iluim"
 	"scrape/kunmanga"
 	"scrape/manhuaus"
@@ -187,10 +188,13 @@ func main() {
 		}
 		iluim.DownloadChapters(chapterUrls)
 	case "orv":
-		log.Println("Starting download of missing ORV chapters...")
+		log.Println("ORV starting download of missing ORV chapters...")
 		orv.DownloadMangaChapters()
 	case "rizzfables":
-		fmt.Println("Starting chapter download...")
+		fmt.Println("Rizzfables starting chapter download...")
 		rizzfables.DownloadMangaChapters(*urlFlag)
+	case "hls":
+		fmt.Println("Honey Lemon Soda, starting chapter download...")
+		hls.DownloadChapters()
 	}
 }
