@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"bytes"
+	"github.com/PuerkitoBio/goquery"
 	"github.com/gocolly/colly"
 	"golang.org/x/image/webp" // Add support for decoding webp
 	"scrape/webClient"
@@ -28,6 +30,7 @@ type ChapterInfo struct {
 }
 
 // Download chapter images and create cbz file
+// implements Fetch with backup utils code, to rery when hitting dealine exceeded issues
 func DownloadChaper(chapterURL, cbzFileName string) error {
 	tmpDir, err := os.MkdirTemp("", "manga_chapter")
 	if err != nil {
@@ -35,65 +38,63 @@ func DownloadChaper(chapterURL, cbzFileName string) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	c := colly.NewCollector()
+	// Fetch chapter page HTML with retry/backoff
+	pageHTML, err := webClient.FetchChapterPage(chapterURL)
+	if err != nil {
+		log.Printf("❌ Error fetching chapter page %s: %v", chapterURL, err)
+		return err
+	}
+
+	// Parse HTML using goquery
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(pageHTML))
+	if err != nil {
+		return fmt.Errorf("failed to parse chapter HTML: %v", err)
+	}
 
 	var imgURLs []string
-	var chapterValue string
+	//var chapterValue string
 
-	c.OnHTML("input#wp-manga-current-chap", func(e *colly.HTMLElement) {
-		val := strings.TrimSpace(e.Attr("value"))
-		if val != "" {
-			chapterValue = val
-		}
-	})
+	chapterValue := strings.TrimSpace(doc.Find("input#wp-manga-current-chap").AttrOr("value", ""))
+	if chapterValue == "" {
+		return fmt.Errorf("chapter value not found")
+	}
 
-	c.OnHTML("div.reading-content img", func(e *colly.HTMLElement) {
-		src := strings.TrimSpace(e.Attr("data-src"))
+	doc.Find("div.reading-content img").Each(func(i int, s *goquery.Selection) {
+		src := strings.TrimSpace(s.AttrOr("data-src", ""))
 		if src != "" {
 			imgURLs = append(imgURLs, src)
 		}
 	})
 
-	if err := c.Visit(chapterURL); err != nil {
-		return err
-	}
-
 	if len(imgURLs) == 0 {
 		return fmt.Errorf("no images found")
 	}
-	if chapterValue == "" {
-		return fmt.Errorf("chapter value not found")
-	}
 
-	fmt.Printf("Found %d images. Downloading and converting to JPG...\n", len(imgURLs))
+	log.Printf("Found %d images in chapter %s", len(imgURLs), chapterValue)
 
 	ticker := time.NewTicker(1500 * time.Millisecond)
 	defer ticker.Stop()
 
-	client := webClient.NewHTTPClient()
+	client := &http.Client{Timeout: 30 * time.Second}
 
 	for i, url := range imgURLs {
 		<-ticker.C
 
-		req, err := webClient.NewImageRequest(url, chapterURL)
+		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
-			fmt.Printf("⚠️ Failed to create request for %s: %v\n", url, err)
+			log.Printf("⚠️ Failed to create request for %s: %v", url, err)
 			continue
 		}
 
-		bodyBytes, err := webClient.FetchImageBytes(client, req)
+		bodyBytes, err := webClient.FetchWithBackoff(client, req)
 		if err != nil {
-			fmt.Printf("⚠️ chapter %s: failed to fetch image %s: %v\n", chapterValue, url, err)
+			log.Printf("⚠️ Chapter %s: failed to fetch image %s: %v", chapterValue, url, err)
 			continue
 		}
 
 		img, err := DecodeImage(bodyBytes, url)
-		if err != nil {
-			fmt.Printf("⚠️ chapter %s: failed to decode image %s: %v\n", chapterValue, url, err)
-			continue
-		}
-		if img == nil {
-			fmt.Printf("⚠️ chapter %s: skipped image %s (decode returned nil)\n", chapterValue, url)
+		if err != nil || img == nil {
+			log.Printf("⚠️ Chapter %s: failed to decode image %s: %v", chapterValue, url, err)
 			continue
 		}
 
@@ -102,26 +103,26 @@ func DownloadChaper(chapterURL, cbzFileName string) error {
 
 		outFile, err := os.Create(filePath)
 		if err != nil {
-			fmt.Printf("⚠️ failed to create file %s: %v\n", filePath, err)
+			log.Printf("⚠️ Failed to create file %s: %v", filePath, err)
 			continue
 		}
 
 		err = jpeg.Encode(outFile, img, &jpeg.Options{Quality: 90})
 		outFile.Close()
 		if err != nil {
-			fmt.Printf("⚠️ failed to save image %s: %v\n", url, err)
+			log.Printf("⚠️ Failed to save image %s: %v", url, err)
 			continue
 		}
 
-		fmt.Println("Saved:", fileName)
+		log.Printf("Saved: %s", fileName)
 	}
 
-	log.Printf("Writing CBZ to: %s\n", cbzFileName)
+	log.Printf("Writing CBZ to: %s", cbzFileName)
 	if err := CreateCbzFile(tmpDir, cbzFileName); err != nil {
-		return err
+		return fmt.Errorf("failed to create CBZ: %v", err)
 	}
 
-	fmt.Println("CBZ file created:", cbzFileName)
+	log.Printf("CBZ file created: %s", cbzFileName)
 	return nil
 }
 

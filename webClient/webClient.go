@@ -3,9 +3,12 @@ package webClient
 import (
 	"bytes"
 	"fmt"
+	"github.com/gocolly/colly"
 	"io"
+	"log"
 	"net/http"
 	"net/http/cookiejar"
+	"os"
 	"strings"
 	"time"
 )
@@ -83,4 +86,111 @@ func FetchImageBytes(client *http.Client, req *http.Request) ([]byte, error) {
 	}
 
 	return nil, fmt.Errorf("failed after %d attempts: %v", maxRetries, lastErr)
+}
+
+// Implements an exponential backoff up to 320s. If at 320s and still failing, it will retry 3 times then hard fail.
+// Successful fetch halves the backoff and resets the max-backoff retry counter.
+// Returns the response body or an error if all retries fail.
+func FetchWithBackoff(client *http.Client, req *http.Request) ([]byte, error) {
+	const (
+		initialBackoff  = 10 * time.Second
+		maxBackoff      = 320 * time.Second
+		maxRetriesAtMax = 3
+	)
+
+	backoff := initialBackoff
+	retriesAtMax := 0
+	attempt := 1
+
+	for {
+		resp, err := client.Do(req)
+		if err != nil {
+			if os.IsTimeout(err) || strings.Contains(err.Error(), "Client.Timeout") {
+				log.Printf("⚠️ Attempt %d: Timeout fetching %s: %v. Backing off for %v", attempt, req.URL, err, backoff)
+				time.Sleep(backoff)
+
+				if backoff < maxBackoff {
+					backoff *= 2
+					if backoff > maxBackoff {
+						backoff = maxBackoff
+					}
+				} else {
+					retriesAtMax++
+					if retriesAtMax >= maxRetriesAtMax {
+						return nil, fmt.Errorf("failed after %d retries at max backoff (%v) for %s", maxRetriesAtMax, maxBackoff, req.URL)
+					}
+				}
+				attempt++
+				continue
+			}
+			return nil, err
+		}
+
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		// On success, halve backoff and reset max retry counter
+		if backoff > initialBackoff {
+			backoff /= 2
+			if backoff < initialBackoff {
+				backoff = initialBackoff
+			}
+		}
+		retriesAtMax = 0
+
+		log.Printf("✅ Attempt %d: Successfully fetched %s", attempt, req.URL)
+		return body, nil
+	}
+}
+
+// Implements an exponential backoff and logs errors when fetching the chapter page HTML
+func FetchChapterPage(chapterURL string) (string, error) {
+	const (
+		initialBackoff  = 10 * time.Second
+		maxBackoff      = 320 * time.Second
+		maxRetriesAtMax = 3
+	)
+
+	backoff := initialBackoff
+	retriesAtMax := 0
+	attempt := 1
+
+	var pageHTML string
+
+	for {
+		c := colly.NewCollector()
+		c.SetRequestTimeout(60 * time.Second) // increase timeout for slow pages
+
+		// Capture the full HTML
+		c.OnResponse(func(r *colly.Response) {
+			pageHTML = string(r.Body)
+		})
+
+		err := c.Visit(chapterURL)
+		if err == nil && strings.TrimSpace(pageHTML) != "" {
+			log.Printf("✅ Attempt %d: Successfully fetched chapter page %s", attempt, chapterURL)
+			return pageHTML, nil
+		}
+
+		// Log error and backoff
+		log.Printf("⚠️ Attempt %d: Failed to fetch chapter page %s: %v. Backing off %v", attempt, chapterURL, err, backoff)
+		time.Sleep(backoff)
+
+		if backoff < maxBackoff {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		} else {
+			retriesAtMax++
+			if retriesAtMax >= maxRetriesAtMax {
+				return "", fmt.Errorf("failed after %d retries at max backoff (%v) for chapter page %s", maxRetriesAtMax, maxBackoff, chapterURL)
+			}
+		}
+
+		attempt++
+	}
 }
