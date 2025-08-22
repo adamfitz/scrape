@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"scrape/parser"
+	"slices"
 	"strings"
 
 	"github.com/chromedp/chromedp"
@@ -208,8 +210,25 @@ func downloadFile(url string, filePath string) error {
 }
 
 func DownloadAndCreateCBZ(chapterURLs []string, chapterMap map[string]string) error {
+
+	// Get list of chapters already downloaded (only *.cbz)
+	downloadedChapters, err := parser.FileList(".")
+	if err != nil {
+		log.Fatalf("error getting file list: %v", err)
+	}
+
+	// filter out non cbz files
+	filteredCbzFiles := parser.FilterCBZFiles(downloadedChapters)
+
 	for _, url := range chapterURLs {
 		chapterName := chapterMap[extractChapterID(url)]
+
+		// dont try and download chapter if it already exists
+		if slices.Contains(filteredCbzFiles, chapterName+".cbz") {
+			continue
+		}
+
+		fmt.Println(chapterName)
 		fmt.Printf("Downloading chapter: %s\n", chapterName)
 		if chapterName == "" {
 			chapterName = "chapter"
