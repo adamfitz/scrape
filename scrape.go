@@ -17,14 +17,14 @@ import (
 	"scrape/xbato"
 	"sort"
 	"strings"
-
-	_ "golang.org/x/image/webp" // Add support for decoding webp
+	//_ "golang.org/x/image/webp" // Add support for decoding webp
 )
 
 func init() {
-	logFile, err := os.OpenFile("scrape.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile("/var/log/scrape/scrape.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalf("Failed to open log file: %v", err)
+		fmt.Printf("Cannot open log file, check /var/log/scrape/scrape.log permissions/\n%v", err)
 	}
 	log.SetOutput(logFile)
 }
@@ -43,7 +43,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *urlFlag == "" && *siteName == "rizzfales" {
+	if *urlFlag == "" && *siteName == "rizzfables" {
 		fmt.Println("Error: --url flag is required")
 		flag.Usage()
 		os.Exit(1)
@@ -162,6 +162,10 @@ func main() {
 			}
 		}
 	case "xbato":
+
+		// check chrome is installed (required)
+		parser.CheckBrowser("xbato")
+
 		chapterUrls, err := xbato.XbatoChapterUrls(*shortName)
 		if err != nil {
 			fmt.Printf("%s\nError retrieving chapter list from %s", err, *siteName)

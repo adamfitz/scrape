@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -412,4 +413,30 @@ func DecodeImageToPng(data []byte, sourceURL string) (image.Image, error) {
 
 	// Return the image.Image for PNG saving
 	return img, nil
+}
+
+// check chrome/chromium browser is installed (dependancy)
+func CheckBrowser(funcName string) {
+	binaryList := []string{
+		"chromium",
+		"chromium-browser",
+		"google-chrome",
+		"google-chrome-beta",
+		"google-chrome-unstable",
+		"google-chrome-dev",
+	}
+
+	for _, name := range binaryList {
+		cmd := exec.Command("which", name)
+		output, _ := cmd.CombinedOutput() // ignore errors
+		path := strings.TrimSpace(string(output))
+		if path != "" {
+			log.Printf("%s - Chrome family browser found: %s", funcName, path)
+			return // silently continue
+		}
+	}
+
+	// none found, hard exit
+	fmt.Printf("Required dependency Chrome/Chromium browser not installed.\n")
+	log.Fatalf("Required dependency Chrome/Chromium browser not installed.")
 }
