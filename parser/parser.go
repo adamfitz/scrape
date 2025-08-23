@@ -440,3 +440,104 @@ func CheckBrowser(funcName string) {
 	fmt.Printf("Required dependency Chrome/Chromium browser not installed.\n")
 	log.Fatalf("Required dependency Chrome/Chromium browser not installed.")
 }
+
+// MgekoUrlToName extracts the manga name from a given Mgeko URL.
+// It supports URLs in the form:
+//
+//	https://www.mgeko.cc/manga/<name>/
+//	https://www.mgeko.cc/manga/<name>/all-chapters/
+//
+// Example:
+//
+//	Input:  https://www.mgeko.cc/manga/monster-eater/all-chapters/
+//	Output: monster-eater
+func MgekoUrlToName(url string) string {
+	log.Printf("extracting manga name from: %s", url)
+
+	// Split the URL into parts by "/"
+	parts := strings.Split(url, "/")
+
+	// Loop through all parts and look for the "manga" segment
+	for i, p := range parts {
+		// When we find "manga", the next segment is always the manga name
+		if p == "manga" && i+1 < len(parts) {
+			return parts[i+1]
+		}
+	}
+
+	// If nothing was found, return empty string
+	return ""
+}
+
+// DownloadAndConvertToPNG downloads an image from imageURL,
+// converts it to PNG if needed, and saves it inside targetDir.
+// Returns error if any.
+func DownloadAndConvertToPNG(imageURL, targetDir string) error {
+	resp, err := http.Get(imageURL)
+	if err != nil {
+		return fmt.Errorf("failed to download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("bad response status: %s", resp.Status)
+	}
+
+	imgBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read image data: %w", err)
+	}
+
+	format, err := DetectImageFormat(imgBytes)
+	if err != nil {
+		return fmt.Errorf("failed to detect image format: %w", err)
+	}
+
+	base := filepath.Base(imageURL)
+	ext := strings.ToLower(filepath.Ext(base))
+	name := strings.TrimSuffix(base, ext)
+
+	// Use your existing padFileName function and change extension to .png
+	paddedFileName := padFileName(name + ".png")
+	outputFile := filepath.Join(targetDir, paddedFileName)
+
+	// If already PNG, just save raw bytes directly
+	if format == "png" {
+		err = os.WriteFile(outputFile, imgBytes, 0644)
+		if err != nil {
+			return fmt.Errorf("failed to save png image: %w", err)
+		}
+		return nil
+	}
+
+	// Decode image according to detected format
+	var img image.Image
+	switch format {
+	case "jpeg", "jpg", "gif", "png":
+		img, _, err = image.Decode(bytes.NewReader(imgBytes))
+		if err != nil {
+			return fmt.Errorf("failed to decode image: %w", err)
+		}
+	case "webp":
+		img, err = webp.Decode(bytes.NewReader(imgBytes))
+		if err != nil {
+			return fmt.Errorf("failed to decode webp image: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported image format: %s", format)
+	}
+
+	// Convert and save as PNG
+	outFile, err := os.Create(outputFile)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer outFile.Close()
+
+	err = png.Encode(outFile, img)
+	if err != nil {
+		return fmt.Errorf("failed to encode png: %w", err)
+	}
+
+	return nil
+}

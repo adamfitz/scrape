@@ -3,21 +3,19 @@ package main
 import (
 	"flag"
 	"fmt"
-
-	//"go/parser"
 	"log"
 	"os"
 	"scrape/hls"
 	"scrape/iluim"
 	"scrape/kunmanga"
 	"scrape/manhuaus"
+	"scrape/mgeko"
 	"scrape/orv"
 	"scrape/parser"
 	"scrape/rizzfables"
 	"scrape/xbato"
 	"sort"
 	"strings"
-	//_ "golang.org/x/image/webp" // Add support for decoding webp
 )
 
 func init() {
@@ -44,6 +42,12 @@ func main() {
 	}
 
 	if *urlFlag == "" && *siteName == "rizzfables" {
+		fmt.Println("Error: --url flag is required")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if *urlFlag == "" && *siteName == "mgeko" {
 		fmt.Println("Error: --url flag is required")
 		flag.Usage()
 		os.Exit(1)
@@ -87,7 +91,7 @@ func main() {
 				fmt.Printf("%s\nError extracting chapter number from URL", err)
 				continue
 			}
-			// check if teh chapter already exists or not
+			// check if th chapter already exists or not
 			fmt.Println("Downloading chapter #", chNumber)
 			err = manhuaus.DownloadChaper(chapter, chNumber)
 
@@ -200,5 +204,10 @@ func main() {
 	case "hls":
 		fmt.Println("Honey Lemon Soda, starting chapter download...")
 		hls.DownloadChapters()
+	case "mgeko":
+		targetName := parser.MgekoUrlToName(*urlFlag)
+		fmt.Printf("%s, starting chapter download...\n", targetName)
+
+		mgeko.DownloadChapters(*urlFlag)
 	}
 }
