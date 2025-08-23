@@ -106,7 +106,7 @@ func FetchWithBackoff(client *http.Client, req *http.Request) ([]byte, error) {
 		resp, err := client.Do(req)
 		if err != nil {
 			if os.IsTimeout(err) || strings.Contains(err.Error(), "Client.Timeout") {
-				log.Printf("⚠️ Attempt %d: Timeout fetching %s: %v. Backing off for %v", attempt, req.URL, err, backoff)
+				log.Printf("Attempt %d: Timeout fetching %s: %v. Backing off for %v", attempt, req.URL, err, backoff)
 				time.Sleep(backoff)
 
 				if backoff < maxBackoff {
@@ -141,7 +141,7 @@ func FetchWithBackoff(client *http.Client, req *http.Request) ([]byte, error) {
 		}
 		retriesAtMax = 0
 
-		log.Printf("✅ Attempt %d: Successfully fetched %s", attempt, req.URL)
+		log.Printf("Attempt %d: Successfully fetched %s", attempt, req.URL)
 		return body, nil
 	}
 }
@@ -171,12 +171,12 @@ func FetchChapterPage(chapterURL string) (string, error) {
 
 		err := c.Visit(chapterURL)
 		if err == nil && strings.TrimSpace(pageHTML) != "" {
-			log.Printf("✅ Attempt %d: Successfully fetched chapter page %s", attempt, chapterURL)
+			log.Printf("Attempt %d: Successfully fetched chapter page %s", attempt, chapterURL)
 			return pageHTML, nil
 		}
 
 		// Log error and backoff
-		log.Printf("⚠️ Attempt %d: Failed to fetch chapter page %s: %v. Backing off %v", attempt, chapterURL, err, backoff)
+		log.Printf("Attempt %d: Failed to fetch chapter page %s: %v. Backing off %v", attempt, chapterURL, err, backoff)
 		time.Sleep(backoff)
 
 		if backoff < maxBackoff {
