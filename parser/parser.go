@@ -197,7 +197,7 @@ func DownloadAndConvertToJPG(imageURL, targetDir string) error {
 	}
 	defer outFile.Close()
 
-	opts := jpeg.Options{Quality: 90}
+	opts := jpeg.Options{Quality: 100}
 	err = jpeg.Encode(outFile, img, &opts)
 	if err != nil {
 		return fmt.Errorf("failed to encode jpeg: %w", err)
