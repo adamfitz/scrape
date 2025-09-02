@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 	"scrape/parser"
 	"strings"
 	"time"
@@ -94,16 +95,18 @@ func chapterUrls(seriesURL string) (map[string]string, error) {
 		chromedp.Navigate(seriesURL),
 		chromedp.WaitVisible(`div.listing-chapters_wrap ul.main.version-chap li.wp-manga-chapter a`, chromedp.ByQuery),
 		chromedp.Evaluate(`
-            [...document.querySelectorAll('div.listing-chapters_wrap ul.main.version-chap li.wp-manga-chapter a')]
-            .map(a => {
-                const txt = a.textContent.trim();
-                if(txt.match(/^Ch\. \d+$/)) {
-                    return { num: txt.replace('Ch. ','') , url: a.href };
-                }
-                return null;
-            })
-            .filter(x => x !== null)
-        `, &rawChapters),
+    [...document.querySelectorAll('div.listing-chapters_wrap ul.main.version-chap li.wp-manga-chapter a')]
+    .map(a => {
+        const txt = a.textContent.trim();
+        // Match "Ch. 72", "Ch. 72.5", "Ch. 72-5", "Ch. 72 Season 1 End", etc.
+        const m = txt.match(/^Ch\.\s*(.+)$/i);
+        if (m) {
+            return { num: m[1].trim().replace(/\s+/g, '-').toLowerCase(), url: a.href };
+        }
+        return null;
+    })
+    .filter(x => x !== null)
+`, &rawChapters),
 	)
 	if err != nil {
 		return nil, err
@@ -169,11 +172,33 @@ func chapterMapping(inputMap map[string]string) map[string]string {
 }
 
 // from the chapter number (key in chapterList) return the chapter filename
-func chapterFileName(chapterNumber string) string {
+func chapterFileName(chapter string) string {
+	// Regex: captures integer + optional decimal + optional suffix
+	re := regexp.MustCompile(`^(\d+)(?:[-\.](\d+))?(.*)$`)
 
-	// pad the chapter number
-	paddedNum := fmt.Sprintf("%03s", chapterNumber)
+	matches := re.FindStringSubmatch(chapter)
+	if len(matches) == 0 {
+		// fallback if no match at all
+		return fmt.Sprintf("ch%s.cbz", chapter)
+	}
 
-	return fmt.Sprintf("ch%s.cbz", paddedNum)
+	whole := matches[1]                     // integer part
+	decimal := matches[2]                   // decimal / half-chapter
+	suffix := strings.Trim(matches[3], "-") // strip leading dashes if present
 
+	// pad integer part
+	padded := fmt.Sprintf("%03s", whole)
+
+	var fileName string
+	if decimal != "" {
+		fileName = fmt.Sprintf("ch%s.%s", padded, decimal)
+	} else {
+		fileName = fmt.Sprintf("ch%s", padded)
+	}
+
+	if suffix != "" {
+		fileName = fmt.Sprintf("%s-%s", fileName, suffix)
+	}
+
+	return fileName + ".cbz"
 }
