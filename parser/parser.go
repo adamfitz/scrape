@@ -9,14 +9,19 @@ import (
 	"image/jpeg"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
+	"time"
 
 	_ "image/gif" // register GIF decoder
 	"image/png"   // register PNG decoder
@@ -540,4 +545,70 @@ func DownloadAndConvertToPNG(imageURL, targetDir string) error {
 	}
 
 	return nil
+}
+
+// variables and constants for seeding concurrency safe random strings
+var (
+	randSrc = rand.New(rand.NewSource(time.Now().UnixNano()))
+	randMux sync.Mutex
+)
+
+const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+// Generate random 5-letter string, safe for concurrent use.
+func RandomString5() string {
+	b := make([]byte, 5)
+
+	randMux.Lock()
+	for i := range b {
+		b[i] = letters[randSrc.Intn(len(letters))]
+	}
+	randMux.Unlock()
+
+	return string(b)
+}
+
+// CreateTempDir creates a unique temporary directory with the given prefix
+// and a random 5-letter string appended. Returns the temp directory path.
+func CreateTempDir(prefix string) (string, error) {
+	uniquePrefix := prefix + RandomString5() // append random string to prefix
+
+	tempDir, err := os.MkdirTemp("", uniquePrefix)
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp directory: %w", err)
+	}
+
+	return tempDir, nil
+}
+
+// CleanupTempDirs removes all directories in tempDirs slice.
+// It can also be set up to handle OS interrupts (SIGINT/SIGTERM).
+func CleanupTempDirs(tempDirs *[]string) {
+	// Catch OS interrupt signals
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigs
+		log.Println("Interrupt received, cleaning up temp directories...")
+		for _, dir := range *tempDirs {
+			if err := os.RemoveAll(dir); err != nil {
+				log.Printf("Failed to remove temp dir %s: %v", dir, err)
+			} else {
+				log.Printf("Removed tempdir: %s", dir)
+			}
+		}
+		os.Exit(1)
+	}()
+
+	// also remove temp dirs when this function exits
+	defer func() {
+		for _, dir := range *tempDirs {
+			if err := os.RemoveAll(dir); err != nil {
+				log.Printf("Failed to remove temp dir %s: %v", dir, err)
+			} else {
+				log.Printf("Removed tempdir: %s", dir)
+			}
+		}
+	}()
 }
