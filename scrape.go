@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"scrape/cfotz"
 	"scrape/hls"
 	"scrape/iluim"
 	"scrape/kunmanga"
@@ -209,5 +210,8 @@ func main() {
 		fmt.Printf("%s, starting chapter download...\n", targetName)
 
 		mgeko.DownloadChapters(*urlFlag)
+	case "cfotz":
+		fmt.Printf("Starting download childhood friend of the zenith\n")
+		cfotz.DownloadChapters()
 	}
 }
