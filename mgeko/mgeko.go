@@ -142,28 +142,41 @@ func chapterUrls(url string) ([]string, error) {
 	return chapters, nil
 }
 
-// chapterMap takes a slice of Mgeko reader URLs and returns a map:
-// key = "ch<number>.cbz" (with integer part padded to 3 digits), value = URL
+// chapterMap takes a slice of URLs and returns a map:
+// key = normalized filename (ch###.part1.part2.cbz), value = URL
+// chapterMap takes a slice of URLs and returns a map:
+// key = normalized filename (ch###.part1.part2.cbz), value = URL
 func chapterMap(urls []string) map[string]string {
 	chapterMap := make(map[string]string)
-	re := regexp.MustCompile(`chapter-([0-9]+(?:\.[0-9]+)?)`)
+
+	// Regex: match main chapter number, then any sequence of part numbers separated by -, _, or .
+	re := regexp.MustCompile(`chapter[-_\.]?(\d+)((?:[-_\.]\d+)*)`)
 
 	for _, url := range urls {
 		matches := re.FindStringSubmatch(url)
-		if len(matches) > 1 {
-			numStr := matches[1]
-			parts := strings.Split(numStr, ".")
-			intPart := parts[0]
-			decPart := ""
-			if len(parts) > 1 {
-				decPart = "." + parts[1] // keep decimal if exists
-			}
+		if len(matches) > 0 {
+			mainNum := matches[1] // main chapter number
+			partStr := matches[2] // optional part string, e.g., "-2-1" or ".2.1"
 
-			// Pad integer part to 3 digits
-			filename := fmt.Sprintf("ch%03s%s.cbz", intPart, decPart)
+			// Normalize separators: replace - or _ with .
+			normalizedPart := strings.ReplaceAll(partStr, "-", ".")
+			normalizedPart = strings.ReplaceAll(normalizedPart, "_", ".")
+
+			// Remove leading dot (if any) unconditionally
+			normalizedPart = strings.TrimPrefix(normalizedPart, ".")
+
+			// Final filename: pad main number to 3 digits
+			filename := fmt.Sprintf("ch%03s", mainNum)
+			if normalizedPart != "" {
+				filename += "." + normalizedPart
+			}
+			filename += ".cbz"
+
 			chapterMap[filename] = url
 		}
 	}
+
+	log.Printf("found chapters: %v", chapterMap)
 
 	return chapterMap
 }
