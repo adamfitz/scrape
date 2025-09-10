@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"scrape/asura"
 	"scrape/cfotz"
 	"scrape/hls"
 	"scrape/iluim"
@@ -67,6 +68,12 @@ func main() {
 		os.Exit(1)
 	}
 	if *urlFlag == "" && *siteName == "stonescape" {
+		fmt.Println("Error: --url flag is required")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if *urlFlag == "" && *siteName == "asura" {
 		fmt.Println("Error: --url flag is required")
 		flag.Usage()
 		os.Exit(1)
@@ -219,9 +226,11 @@ func main() {
 	case "cfotz":
 		fmt.Printf("Starting download childhood friend of the zenith\n")
 		cfotz.DownloadChapters()
-
 	case "stonescape":
 		fmt.Printf("Starting download from stonescape for: %s\n", *urlFlag)
 		stonescape.DownloadChapters(*urlFlag)
+	case "asura":
+		fmt.Printf("Starting download from asuracomics for: %s\n", *urlFlag)
+		asura.DownloadChapters(*urlFlag)
 	}
 }
