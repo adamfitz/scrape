@@ -19,38 +19,59 @@ import (
 	"github.com/gocolly/colly"
 )
 
-// get list of all the chapter URLss
+// get list of all the chapter URLs with detailed logging
 func XbatoChapterUrls(mangaName string) ([]string, error) {
 	var urls []string
 
 	mangaURL := fmt.Sprintf("https://xbato.com/series/%s", mangaName)
+	log.Printf("[xbato - XbatoChapterUrls] [INFO] Starting scraping for manga: %s", mangaURL)
 
 	c := colly.NewCollector(
 		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"),
 	)
 
+	// Log when the collector requests a page
+	c.OnRequest(func(r *colly.Request) {
+		log.Printf("[xbato - XbatoChapterUrls] [INFO] Visiting: %s", r.URL.String())
+	})
+
+	// Log each found chapter link
 	c.OnHTML("div.episode-list div.main a.visited.chapt", func(e *colly.HTMLElement) {
 		href := e.Attr("href")
 		if href != "" {
 			fullURL := "https://xbato.com" + href
 			urls = append(urls, fullURL)
+			log.Printf("[DEBUG] Found chapter URL: %s", fullURL)
+		} else {
+			log.Printf("[WARN] Found chapter element with empty href")
 		}
 	})
 
+	// Log errors during scraping
 	var scrapeErr error
-	c.OnError(func(_ *colly.Response, err error) {
+	c.OnError(func(resp *colly.Response, err error) {
+		if resp != nil {
+			log.Printf("[xbato - XbatoChapterUrls] [ERROR] Request to %s failed with status %d: %v", resp.Request.URL, resp.StatusCode, err)
+		} else {
+			log.Printf("[xbato - XbatoChapterUrls] [ERROR] Scraping error: %v", err)
+		}
 		scrapeErr = err
 	})
 
+	// Visit the manga page
 	err := c.Visit(mangaURL)
 	if err != nil {
+		log.Printf("[xbato - XbatoChapterUrls] [ERROR] Failed to visit manga page: %v", err)
 		return nil, err
 	}
 
+	// Check if scraping encountered an error
 	if scrapeErr != nil {
+		log.Printf("[xbato - XbatoChapterUrls] [ERROR] Scraping failed: %v", scrapeErr)
 		return nil, scrapeErr
 	}
 
+	log.Printf("[xbato - XbatoChapterUrls] [INFO] Scraping completed, total chapters found: %d", len(urls))
 	return urls, nil
 }
 
