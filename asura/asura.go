@@ -24,28 +24,23 @@ type chapterImage struct {
 
 // ExtractChapterLinksFromURL fetches the series page and returns all valid chapter URLs
 func ExtractChapterLinksFromURL(seriesURL string) ([]string, error) {
-	log.Printf("Fetching series page: %s\n", seriesURL)
+	log.Printf("[asura - ExtractChapterLinksFromURL] Fetching series page: %s\n", seriesURL)
 
 	resp, err := http.Get(seriesURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch series page: %w", err)
+		return nil, fmt.Errorf("[asura - ExtractChapterLinksFromURL] failed to fetch series page: %w", err)
 	}
 	defer resp.Body.Close()
 
-	log.Printf("HTTP status code: %d\n", resp.StatusCode)
+	log.Printf("[asura - ExtractChapterLinksFromURL] HTTP status code: %d\n", resp.StatusCode)
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("failed to fetch series page: status code %d", resp.StatusCode)
+		return nil, fmt.Errorf("[asura - ExtractChapterLinksFromURL] failed to fetch series page: status code %d", resp.StatusCode)
 	}
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+		return nil, fmt.Errorf("[asura - ExtractChapterLinksFromURL] failed to parse HTML: %w", err)
 	}
-
-	// Extract series slug from URL
-	parts := strings.Split(strings.Trim(seriesURL, "/"), "/")
-	seriesSlug := parts[len(parts)-1]
-	log.Printf("Series slug: %s\n", seriesSlug)
 
 	chapterURLs := make(map[string]struct{})
 	doc.Find("a").Each(func(i int, s *goquery.Selection) {
@@ -54,26 +49,29 @@ func ExtractChapterLinksFromURL(seriesURL string) ([]string, error) {
 			return
 		}
 		href = strings.TrimSpace(href)
-		log.Printf("Found href: %s\n", href)
+		log.Printf("[asura - ExtractChapterLinksFromURL] Found href: %s\n", href)
 
-		// Only keep links containing the series slug AND "/chapter/"
-		if strings.Contains(href, seriesSlug) && strings.Contains(href, "/chapter/") {
+		// Keep any link that contains "/chapter/"
+		if strings.Contains(href, "/chapter/") {
 			// Ensure full URL
 			if !strings.HasPrefix(href, "http") {
-				href = "https://asuracomic.net/series/" + href
+				href = "https://asuracomic.net/series/" + strings.TrimPrefix(href, "/")
 			}
-			log.Printf("Matched chapter URL: %s\n", href)
+			log.Printf("[asura - ExtractChapterLinksFromURL] Matched chapter URL: %s\n", href)
 			chapterURLs[href] = struct{}{}
 		}
 	})
 
-	// Convert map to slice
+	// Convert map to slice and sort descending (latest first)
 	var urls []string
 	for u := range chapterURLs {
 		urls = append(urls, u)
 	}
+	sort.Slice(urls, func(i, j int) bool {
+		return urls[i] > urls[j] // descending
+	})
 
-	log.Printf("Total chapters found: %d\n", len(urls))
+	log.Printf("[asura - ExtractChapterLinksFromURL] Total chapters found: %d\n", len(urls))
 	return urls, nil
 }
 

@@ -237,7 +237,9 @@ func main() {
 		for _, ch := range chList {
 			fmt.Printf("%s\t%s\n", ch, output[ch])
 			chapterImages, _ := asura.GetChapterImageURLs(output[ch])
-			fmt.Println(chapterImages)
+			for _, img := range chapterImages {
+				fmt.Printf("[Page %v] %s\n", img.Order, img.URL)
+			}
 			break
 		}
 	}
