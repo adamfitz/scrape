@@ -231,19 +231,6 @@ func main() {
 		stonescape.DownloadChapters(*urlFlag)
 	case "asura":
 		fmt.Printf("Starting download from asuracomics for: %s\n", *urlFlag)
-		chapters, _ := asura.ExtractChapterLinksFromURL(*urlFlag)
-		output := asura.ChapterFilenames(chapters)
-		chList, _ := parser.SortKeys(output)
-		for _, ch := range chList {
-			fmt.Printf("%s\t%s\n", ch, output[ch])
-			chapterImages, err := asura.GetSortedChapterImages(output[ch])
-			if err != nil {
-				log.Fatalf("Failed to get images: %v", err)
-			}
-			for _, img := range chapterImages {
-				fmt.Printf("[Page %d] %s\n", img.Order, img.URL)
-			}
-			break
-		}
+		asura.DownloadChapters(*urlFlag)
 	}
 }
