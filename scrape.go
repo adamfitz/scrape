@@ -236,9 +236,12 @@ func main() {
 		chList, _ := parser.SortKeys(output)
 		for _, ch := range chList {
 			fmt.Printf("%s\t%s\n", ch, output[ch])
-			chapterImages, _ := asura.GetChapterImageURLs(output[ch])
+			chapterImages, err := asura.GetSortedChapterImages(output[ch])
+			if err != nil {
+				log.Fatalf("Failed to get images: %v", err)
+			}
 			for _, img := range chapterImages {
-				fmt.Printf("[Page %v] %s\n", img.Order, img.URL)
+				fmt.Printf("[Page %d] %s\n", img.Order, img.URL)
 			}
 			break
 		}

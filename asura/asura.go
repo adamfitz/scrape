@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
-	//"strconv"
-	"os"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/chromedp/chromedp"
@@ -114,23 +114,23 @@ func ChapterFilenames(urls []string) map[string]string {
 	return result
 }
 
-// GetChapterImageURLs fetches chapter images with detailed logging and proper script parsing.
-func GetChapterImageURLs(chapterURL string) ([]chapterImage, error) {
-	log.Printf("[asura - GetChapterImageURLs] Starting fetch for: %s", chapterURL)
+// Fetchesetches all image URLs from a chapter page (unsorted)
+func GetRawChapterImageURLs(chapterURL string) ([]string, error) {
+	log.Printf("[asura - GetRawChapterImageURLs] Starting fetch for: %s", chapterURL)
 
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	var html string
-	log.Printf("[asura - GetChapterImageURLs] Navigating to page...")
+	log.Printf("[asura - GetRawChapterImageURLs] Navigating to page...")
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(chapterURL),
 		chromedp.WaitReady("body"),
 		chromedp.OuterHTML("html", &html),
 	); err != nil {
-		return nil, fmt.Errorf("navigation failed: %w", err)
+		return nil, fmt.Errorf("[asura - GetRawChapterImageURLs] navigation failed: %w", err)
 	}
-	log.Printf("[asura - GetChapterImageURLs] Navigation complete. HTML length: %d", len(html))
+	log.Printf("[asura - GetRawChapterImageURLs] Navigation complete. HTML length: %d", len(html))
 
 	// Optionally save page to /tmp for inspection
 	tmpFile, err := os.CreateTemp("/tmp", "asura-chapter-*.html")
@@ -138,44 +138,118 @@ func GetChapterImageURLs(chapterURL string) ([]chapterImage, error) {
 		tmpFile.WriteString(html)
 		tmpFile.Close()
 		defer os.Remove(tmpFile.Name())
-		log.Printf("[asura - GetChapterImageURLs] Saved page to %s for inspection", tmpFile.Name())
+		log.Printf("[asura - GetRawChapterImageURLs] Saved page to %s for inspection", tmpFile.Name())
 	}
 
 	// Extract <script> tags
 	scripts := extractScriptsFromHTML(html)
-	log.Printf("[asura - GetChapterImageURLs] Total <script> tags found: %d", len(scripts))
+	log.Printf("[asura - GetRawChapterImageURLs] Total <script> tags found: %d", len(scripts))
 
-	var images []chapterImage
+	var urls []string
 	for i, script := range scripts {
-		log.Printf("[asura - GetChapterImageURLs] Parsing script %d content length: %d", i, len(script))
-		matches := extractImageURLsFromScript(script) // implement regex/json parsing
-		log.Printf("[asura - GetChapterImageURLs] Script %d matches found: %d", i, len(matches))
+		matches := extractImageURLsFromScript(script)
+		log.Printf("[asura - GetRawChapterImageURLs] Script %d matches found: %d", i, len(matches))
+		urls = append(urls, matches...)
+	}
 
-		for j, url := range matches {
-			images = append(images, chapterImage{
-				Order: j + 1, // ensure sequential ordering
-				URL:   url,
-			})
+	log.Printf("[asura - GetRawChapterImageURLs] Total raw image URLs extracted: %d", len(urls))
+	return urls, nil
+}
+
+// FilterImageURLs filters URLs to only those with filenames like xx-optimized.webp
+func FilterImageURLs(urls []string) []string {
+	var filtered []string
+	re := regexp.MustCompile(`(\d{1,3})-optimized\.webp$`)
+
+	for _, u := range urls {
+		if re.MatchString(u) {
+			filtered = append(filtered, u)
+		} else {
+			log.Printf("[asura - FilterImageURLs] Ignored URL (does not match pattern): %s", u)
 		}
 	}
 
-	// Sort by Order just in case
-	sort.Slice(images, func(i, j int) bool {
-		return images[i].Order < images[j].Order
+	log.Printf("[asura - FilterImageURLs] Filtered image URLs count: %d", len(filtered))
+	return filtered
+}
+
+// BuildChapterImages converts filtered URLs into a sorted slice of chapterImage
+func BuildChapterImages(urls []string) []chapterImage {
+	type temp struct {
+		order int
+		url   string
+	}
+
+	var tmpList []temp
+	re := regexp.MustCompile(`(\d{1,3})-optimized\.webp$`)
+
+	for _, u := range urls {
+		m := re.FindStringSubmatch(u)
+		if len(m) == 2 {
+			num, err := strconv.Atoi(m[1])
+			if err != nil {
+				log.Printf("[asura - BuildChapterImages] Failed to parse number from URL %s: %v", u, err)
+				continue
+			}
+			tmpList = append(tmpList, temp{order: num, url: u})
+			log.Printf("[asura - BuildChapterImages] Added URL %s with order %d", u, num)
+		} else {
+			log.Printf("[asura - BuildChapterImages] Skipping URL (regex did not match): %s", u)
+		}
+	}
+
+	// Sort by the numeric prefix
+	sort.Slice(tmpList, func(i, j int) bool {
+		return tmpList[i].order < tmpList[j].order
 	})
 
-	log.Printf("[asura - GetChapterImageURLs] Total images extracted and sorted: %d", len(images))
-	return images, nil
+	// Build final slice
+	images := make([]chapterImage, len(tmpList))
+	for i, t := range tmpList {
+		images[i] = chapterImage{
+			Order: i + 1,
+			URL:   t.url,
+		}
+		log.Printf("[asura - BuildChapterImages] Final ChapterImage [%d]: %s", images[i].Order, images[i].URL)
+	}
+
+	log.Printf("[asura - BuildChapterImages] Total chapter images built: %d", len(images))
+	return images
 }
 
-/*
-func min(a, b int) int {
-    if a < b {
-        return a
-    }
-    return b
+// GetSortedChapterImages is now updated to deduplicate URLs first
+func GetSortedChapterImages(chapterURL string) ([]chapterImage, error) {
+	rawURLs, err := GetRawChapterImageURLs(chapterURL)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := FilterImageURLs(rawURLs)
+	deduped := DeduplicateURLs(filtered)
+	chapterImages := BuildChapterImages(deduped)
+
+	log.Printf("[asura - GetSortedChapterImages] Total sorted chapter images after deduplication: %d", len(chapterImages))
+	return chapterImages, nil
 }
-*/
+
+// DeduplicateURLs removes duplicate URLs from a slice while preserving order
+func DeduplicateURLs(urls []string) []string {
+	log.Printf("[asura - DeduplicateURLs] Starting deduplication. Total URLs: %d", len(urls))
+	seen := make(map[string]struct{})
+	var deduped []string
+
+	for _, u := range urls {
+		if _, ok := seen[u]; ok {
+			log.Printf("[asura - DeduplicateURLs] Skipping duplicate URL: %s", u)
+			continue
+		}
+		seen[u] = struct{}{}
+		deduped = append(deduped, u)
+	}
+
+	log.Printf("[asura - DeduplicateURLs] Deduplication complete. Remaining URLs: %d", len(deduped))
+	return deduped
+}
 
 // Returns the content of all <script> tags in the HTML
 func extractScriptsFromHTML(html string) []string {
