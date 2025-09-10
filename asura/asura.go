@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"scrape/parser"
 
@@ -194,7 +195,9 @@ func rawChapterImageUrls(chapterURL string) ([]string, error) {
 	defer cancel()
 
 	var html string
-	log.Printf("[asura - rawChapterImageUrls] Navigating to page...")
+
+	// --- Navigation ---
+	startNav := time.Now()
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(chapterURL),
 		chromedp.WaitReady("body"),
@@ -202,9 +205,11 @@ func rawChapterImageUrls(chapterURL string) ([]string, error) {
 	); err != nil {
 		return nil, fmt.Errorf("[asura - rawChapterImageUrls] navigation failed: %w", err)
 	}
-	log.Printf("[asura - rawChapterImageUrls] Navigation complete. HTML length: %d", len(html))
+	elapsedNav := time.Since(startNav)
+	log.Printf("[asura - rawChapterImageUrls] Navigation complete in %s. HTML length: %d", elapsedNav, len(html))
 
-	// Optionally save page to /tmp for inspection
+	// --- HTML Parsing ---
+	startParse := time.Now()
 	tmpFile, err := os.CreateTemp("/tmp", "asura-chapter-*.html")
 	if err == nil {
 		tmpFile.WriteString(html)
@@ -212,19 +217,31 @@ func rawChapterImageUrls(chapterURL string) ([]string, error) {
 		defer os.Remove(tmpFile.Name())
 		log.Printf("[asura - rawChapterImageUrls] Saved page to %s for inspection", tmpFile.Name())
 	}
-
-	// Extract <script> tags
 	scripts := extractScriptsFromHTML(html)
-	log.Printf("[asura - rawChapterImageUrls] Total <script> tags found: %d", len(scripts))
+	elapsedParse := time.Since(startParse)
+	log.Printf("[asura - rawChapterImageUrls] HTML parsing complete in %s. Total <script> tags found: %d", elapsedParse, len(scripts))
 
+	// --- Extraction & Download Timing ---
+	startExtract := time.Now()
 	var urls []string
 	for i, script := range scripts {
 		matches := extractImageURLsFromScript(script)
 		log.Printf("[asura - rawChapterImageUrls] Script %d matches found: %d", i, len(matches))
 		urls = append(urls, matches...)
 	}
+	elapsedExtract := time.Since(startExtract)
+	log.Printf("[asura - rawChapterImageUrls] Extraction complete in %s. Total raw image URLs extracted: %d", elapsedExtract, len(urls))
 
-	log.Printf("[asura - rawChapterImageUrls] Total raw image URLs extracted: %d", len(urls))
+	// --- Optional: measure total download time for all images ---
+	startDownload := time.Now()
+	for _, url := range urls {
+		if _, err := http.Get(url); err != nil {
+			log.Printf("[asura - rawChapterImageUrls] Warning: failed to download %s: %v", url, err)
+		}
+	}
+	elapsedDownload := time.Since(startDownload)
+	log.Printf("[asura - rawChapterImageUrls] Total download time for all images: %s", elapsedDownload)
+
 	return urls, nil
 }
 
