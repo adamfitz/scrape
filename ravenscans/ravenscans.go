@@ -176,6 +176,14 @@ func DownloadMangaChapters(mangaUrl string) {
 		log.Fatalf("[ERROR] raven scans DownloadMangaChapters() - Get Chapter URLs failed: %v", err)
 	}
 
+	// Remove already downloaded chapters from the map
+	for _, chName := range downloadedChapters {
+		if _, ok := chapterMap[chName]; ok {
+			delete(chapterMap, chName)
+			log.Printf("[INFO] raven scans DownloadMangaChapters() - %s already downloaded, removed from chapterMap", chName)
+		}
+	}
+
 	// sort the chapters
 	sortedChapterList, sortError := parser.SortKeys(chapterMap)
 	if sortError != nil {
@@ -201,6 +209,12 @@ func DownloadMangaChapters(mangaUrl string) {
 			log.Printf("[ERROR] raven scans DownloadMangaChapters() - failed to create temp dir for %s: %v", chapterName, err)
 			continue
 		}
+		// Schedule temp dir removal after the current loop iteration ends
+		defer func(dir string) {
+			if err := os.RemoveAll(dir); err != nil {
+				log.Printf("[ERROR] raven scans DownloadMangaChapters() - failed to remove temp dir %s: %v", dir, err)
+			}
+		}(tmpDir)
 
 		log.Printf("Starting download for chapter: %s, with %d images", chapterName, len(chapterMap))
 
@@ -218,11 +232,6 @@ func DownloadMangaChapters(mangaUrl string) {
 		} else {
 			log.Printf("[INFO] raven scans DownloadMangaChapters() - Created CBZ file: %s", targetFile)
 			fmt.Printf("Created CBZ file: %s\n", targetFile)
-		}
-
-		// Clean up temp directory after CBZ creation
-		if err := os.RemoveAll(tmpDir); err != nil {
-			log.Printf("[ERROR] raven scans DownloadMangaChapters() - failed to remove temp dir %s: %v", tmpDir, err)
 		}
 	}
 }
