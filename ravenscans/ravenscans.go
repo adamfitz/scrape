@@ -176,8 +176,16 @@ func DownloadMangaChapters(mangaUrl string) {
 		log.Fatalf("[ERROR] raven scans DownloadMangaChapters() - Get Chapter URLs failed: %v", err)
 	}
 
+	// sort the chapters
+	sortedChapterList, sortError := parser.SortKeys(chapterMap)
+	if sortError != nil {
+		log.Fatalf("[ERROR] raven scans DownloadMangaChapters() - failed to srot chapter keys %v", sortError)
+	}
+
 	// grab page, extract image urls and download images in the chapter
-	for chapterName, chapterUrl := range chapterMap {
+	//for chapterName, chapterUrl := range chapterMap {
+	for _, chapterName := range sortedChapterList {
+		chapterUrl := chapterMap[chapterName]
 		fmt.Printf("[INFO] raven scans DownloadMangaChapters() - visiting: %s\n", chapterUrl)
 
 		// get the fuillpage content (after JS loading)
