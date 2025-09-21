@@ -235,20 +235,6 @@ func main() {
 		asura.DownloadChapters(*urlFlag)
 	case "ravenscans":
 		fmt.Printf("Starting download from ravenscans for: %s\n", *urlFlag)
-		chapterMap, cMapErr := ravenscans.ChapterURLs(*urlFlag)
-		if cMapErr != nil {
-			log.Fatalf("ravenscans error getting chapter map %v", cMapErr)
-		}
-		for _, value := range chapterMap {
-			fmt.Printf("Visiting: %s\n", value)
-			pageHtml, _ := ravenscans.VisitPage(value)
-			//fmt.Println(pageHtml)
-			fmt.Println("Extracing image urls:")
-			images := ravenscans.ExtractChapterImageUrls(pageHtml, value)
-			for _, url := range images {
-				fmt.Printf("%s\n", url)
-			}
-
-		}
+		ravenscans.DownloadMangaChapters(*urlFlag)
 	}
 }
