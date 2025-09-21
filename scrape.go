@@ -239,8 +239,16 @@ func main() {
 		if cMapErr != nil {
 			log.Fatalf("ravenscans error getting chapter map %v", cMapErr)
 		}
-		for key, value := range chapterMap {
-			fmt.Printf("%s\t%s\n", key, value)
+		for _, value := range chapterMap {
+			fmt.Printf("Visiting: %s\n", value)
+			pageHtml, _ := ravenscans.VisitPage(value)
+			//fmt.Println(pageHtml)
+			fmt.Println("Extracing image urls:")
+			images := ravenscans.ExtractChapterImageUrls(pageHtml, value)
+			for _, url := range images {
+				fmt.Printf("%s\n", url)
+			}
+
 		}
 	}
 }
