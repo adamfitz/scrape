@@ -4,86 +4,82 @@ import (
 	"archive/zip"
 	"errors"
 	"fmt"
-	"github.com/gocolly/colly"
+	"golang.org/x/net/html"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"scrape/cfproxy"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// Download image from URL and save to disk
-func downloadKunMangaImage(imgURL, outputPath string, referer string) error {
-	req, err := http.NewRequest("GET", imgURL, nil)
+// KunMangaChapterUrls fetches chapter URLs using regular HTTP client
+func KunMangaChapterUrls(shortName string) []string {
+	return getChapterURLsWithClient(shortName, http.DefaultClient)
+}
+
+// KunMangaChapterUrlsWithProxy fetches chapter URLs using CF proxy
+func KunMangaChapterUrlsWithProxy(shortName string, proxyPort int) []string {
+	client := cfproxy.NewProxiedClient(proxyPort)
+	return getChapterURLsWithClient(shortName, client)
+}
+
+// getChapterURLsWithClient fetches chapter URLs using the provided HTTP client
+func getChapterURLsWithClient(shortName string, client *http.Client) []string {
+	mangaURL := fmt.Sprintf("https://kunmanga.com/manga/%s", shortName)
+
+	log.Printf("[INFO] Fetching manga page: %s", mangaURL)
+
+	req, err := http.NewRequest("GET", mangaURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		log.Printf("[ERROR] Failed to create request: %v", err)
+		return nil
 	}
 
-	// Required headers to avoid 403
-	req.Header.Set("User-Agent", "Mozilla/5.0")
-	req.Header.Set("Referer", referer)
+	// Set browser-like headers
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("HTTP request failed: %w", err)
+		log.Printf("[ERROR] Failed to fetch manga page: %v", err)
+		return nil
 	}
 	defer resp.Body.Close()
 
-	log.Printf("GET %s => %d\n", imgURL, resp.StatusCode)
-
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("bad status: %s", resp.Status)
+		log.Printf("[ERROR] Manga page returned status %d", resp.StatusCode)
+		return nil
 	}
 
-	out, err := os.Create(outputPath)
+	// Parse HTML to extract chapter URLs
+	chapterURLs, err := extractChapterURLsFromHTML(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
+		log.Printf("[ERROR] Failed to parse chapter URLs: %v", err)
+		return nil
 	}
-	defer out.Close()
 
-	_, err = io.Copy(out, resp.Body)
-	return err
+	log.Printf("[INFO] Found %d chapters", len(chapterURLs))
+	return chapterURLs
 }
 
-// mangaName is the name of the manga from the url eg:
-// From: https://kunmanga.com/manga/ugly-complex/
-// the mangaName will be the string "ugly-complex"
-func KunMangaChapterUrls(mangaName string) []string {
-
-	baseUrl := "https://kunmanga.com/manga"
-	c := colly.NewCollector(
-		colly.AllowedDomains("kunmanga.com"),
-	)
-
-	var chapterLinks []string
-
-	// Select all <a> elements under the chapter list
-	c.OnHTML("ul.main.version-chap li.wp-manga-chapter > a", func(e *colly.HTMLElement) {
-		link := e.Attr("href")
-		chapterLinks = append(chapterLinks, link)
-	})
-
-	c.OnRequest(func(r *colly.Request) {
-		fmt.Println("\nVisiting:", r.URL.String())
-	})
-
-	// build the url to visit
-	err := c.Visit(baseUrl + "/" + mangaName + "/")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return chapterLinks
-}
-
-// DownloadKunMangaChapters downloads chapter images to temp, zips to CBZ, cleans up.
-// Returns error on failure.
-// DownloadKunMangaChapters downloads chapter images to temp, zips to CBZ, cleans up.
-// Saves CBZ as ch<num>.cbz in current directory. Returns error on failure.
+// DownloadKunMangaChapters downloads a chapter using regular HTTP client
 func DownloadKunMangaChapters(url string, chapterNumber int) error {
+	return downloadChapterWithClient(url, chapterNumber, http.DefaultClient)
+}
+
+// DownloadKunMangaChaptersWithProxy downloads a chapter using CF proxy
+func DownloadKunMangaChaptersWithProxy(url string, chapterNumber int, proxyPort int) error {
+	client := cfproxy.NewProxiedClient(proxyPort)
+	return downloadChapterWithClient(url, chapterNumber, client)
+}
+
+// downloadChapterWithClient is the core download function that accepts any HTTP client
+func downloadChapterWithClient(url string, chapterNumber int, client *http.Client) error {
 	tempDir := filepath.Join(os.TempDir(), "chapter-dl")
 	chapterSlug := filepath.Base(strings.Trim(url, "/"))
 	chapterTempDir := filepath.Join(tempDir, chapterSlug)
@@ -95,27 +91,31 @@ func DownloadKunMangaChapters(url string, chapterNumber int) error {
 		return fmt.Errorf("[ERROR] Failed to create temp directory %s: %w", chapterTempDir, err)
 	}
 
-	c := colly.NewCollector(
-		colly.AllowedDomains("kunmanga.com"),
-	)
-	c.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-
-	var imageURLs []string
-
-	c.OnHTML("div.reading-content img", func(e *colly.HTMLElement) {
-		imgURL := strings.TrimSpace(e.Attr("src"))
-		if imgURL != "" {
-			imageURLs = append(imageURLs, imgURL)
-		}
-	})
-
-	c.OnRequest(func(r *colly.Request) {
-		log.Printf("[INFO] Visiting %s", r.URL.String())
-	})
-
-	err = c.Visit(url)
+	// Get the chapter page content
+	log.Printf("[INFO] Fetching chapter page: %s", url)
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return fmt.Errorf("[ERROR] Failed to visit page %s: %w", url, err)
+		return fmt.Errorf("[ERROR] Failed to create request for %s: %w", url, err)
+	}
+
+	// Set browser-like headers for chapter page
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("[ERROR] Failed to fetch chapter page %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("[ERROR] Chapter page returned status %d for %s", resp.StatusCode, url)
+	}
+
+	// Parse HTML to extract image URLs
+	imageURLs, err := extractImageURLsFromHTML(resp.Body)
+	if err != nil {
+		return fmt.Errorf("[ERROR] Failed to parse HTML for %s: %w", url, err)
 	}
 
 	if len(imageURLs) == 0 {
@@ -123,19 +123,28 @@ func DownloadKunMangaChapters(url string, chapterNumber int) error {
 		return errors.New("no images found on chapter page")
 	}
 
+	log.Printf("[INFO] Found %d images for chapter %s", len(imageURLs), chapterSlug)
+
 	// Download images with retry logic
 	for i, imgURL := range imageURLs {
-		outputPath := filepath.Join(chapterTempDir, fmt.Sprintf("%03d%s", i+1, filepath.Ext(imgURL)))
+		// Handle relative URLs
+		if strings.HasPrefix(imgURL, "/") {
+			imgURL = "https://kunmanga.com" + imgURL
+		} else if !strings.HasPrefix(imgURL, "http") {
+			imgURL = "https://" + imgURL
+		}
+
+		outputPath := filepath.Join(chapterTempDir, fmt.Sprintf("%03d%s", i+1, getImageExtension(imgURL)))
 		var lastErr error
 
 		for attempt := 1; attempt <= 3; attempt++ {
 			log.Printf("[INFO] Downloading image %d/%d: %s (attempt %d)", i+1, len(imageURLs), imgURL, attempt)
-			lastErr = downloadKunMangaImage(imgURL, outputPath, url)
+			lastErr = downloadImageWithClient(imgURL, outputPath, url, client)
 			if lastErr == nil {
-				log.Printf("[INFO] Successfully downloaded %s", imgURL)
+				log.Printf("[INFO] Successfully downloaded image %d", i+1)
 				break
 			}
-			log.Printf("[WARN] Failed to download %s on attempt %d: %v", imgURL, attempt, lastErr)
+			log.Printf("[WARN] Failed to download image %d on attempt %d: %v", i+1, attempt, lastErr)
 			time.Sleep(time.Duration(attempt*2) * time.Second) // Exponential backoff
 		}
 
@@ -171,6 +180,115 @@ func DownloadKunMangaChapters(url string, chapterNumber int) error {
 
 	log.Printf("[INFO] Finished download for chapter %s", chapterSlug)
 	return nil
+}
+
+// downloadImageWithClient downloads a single image using the provided HTTP client
+func downloadImageWithClient(imgURL, outputPath, referer string, client *http.Client) error {
+	req, err := http.NewRequest("GET", imgURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers to mimic browser request
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", referer)
+	req.Header.Set("Accept", "image/webp,image/apng,image/*,*/*;q=0.8")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("image download returned status %d", resp.StatusCode)
+	}
+
+	// Create output file
+	outFile, err := os.Create(outputPath)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer outFile.Close()
+
+	// Copy image data
+	_, err = io.Copy(outFile, resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to save image: %w", err)
+	}
+
+	return nil
+}
+
+// extractChapterURLsFromHTML parses the manga page to find chapter links
+func extractChapterURLsFromHTML(htmlContent io.Reader) ([]string, error) {
+	doc, err := html.Parse(htmlContent)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+
+	var chapterURLs []string
+	var traverse func(*html.Node)
+	traverse = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "a" {
+			// Look for chapter links - typically in elements with "wp-manga-chapter" class
+			if isChapterLink(n) {
+				for _, attr := range n.Attr {
+					if attr.Key == "href" {
+						chapterURL := strings.TrimSpace(attr.Val)
+						if chapterURL != "" {
+							// Convert relative URLs to absolute
+							if strings.HasPrefix(chapterURL, "/") {
+								chapterURL = "https://kunmanga.com" + chapterURL
+							}
+							chapterURLs = append(chapterURLs, chapterURL)
+						}
+						break
+					}
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			traverse(c)
+		}
+	}
+	traverse(doc)
+
+	return chapterURLs, nil
+}
+
+// extractImageURLsFromHTML parses HTML content to find manga image URLs
+func extractImageURLsFromHTML(htmlContent io.Reader) ([]string, error) {
+	doc, err := html.Parse(htmlContent)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+
+	var imageURLs []string
+	var traverse func(*html.Node)
+	traverse = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "img" {
+			// Look for images in the reading content
+			if hasClass(n, "wp-manga-chapter-img") ||
+				isInReadingContent(n) {
+				for _, attr := range n.Attr {
+					if attr.Key == "src" || attr.Key == "data-src" {
+						imgURL := strings.TrimSpace(attr.Val)
+						if imgURL != "" && !strings.Contains(imgURL, "loading") && !strings.Contains(imgURL, "placeholder") {
+							imageURLs = append(imageURLs, imgURL)
+						}
+						break
+					}
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			traverse(c)
+		}
+	}
+	traverse(doc)
+
+	return imageURLs, nil
 }
 
 // createCBZFromDir zips all files from srcDir into a zip file at cbzPath
@@ -216,7 +334,7 @@ func createCBZFromDir(cbzPath, srcDir string) error {
 	return nil
 }
 
-// parseChapterNumber extracts the number from strings like "chapter-18" or "chapter-18-5"
+// ParseChapterNumber extracts the number from strings like "chapter-18" or "chapter-18-5"
 func ParseChapterNumber(slug string) int {
 	slug = strings.ToLower(slug)
 	// Find first digit sequence after "chapter-"
@@ -245,4 +363,81 @@ func ParseChapterNumber(slug string) int {
 		return 0
 	}
 	return n
+}
+
+// Helper function to identify chapter links
+func isChapterLink(n *html.Node) bool {
+	// Check if this is a chapter link based on common patterns
+	for _, attr := range n.Attr {
+		if attr.Key == "class" && strings.Contains(attr.Val, "wp-manga-chapter") {
+			return true
+		}
+		if attr.Key == "href" && strings.Contains(attr.Val, "/chapter/") {
+			return true
+		}
+	}
+
+	// Check parent elements for chapter listing context
+	parent := n.Parent
+	for parent != nil && parent.Type == html.ElementNode {
+		for _, attr := range parent.Attr {
+			if attr.Key == "class" {
+				if strings.Contains(attr.Val, "wp-manga-chapter") ||
+					strings.Contains(attr.Val, "chapter-list") ||
+					strings.Contains(attr.Val, "listing-chapters") {
+					return true
+				}
+			}
+		}
+		parent = parent.Parent
+	}
+
+	return false
+}
+
+// Helper function to check if node has a specific class
+func hasClass(n *html.Node, className string) bool {
+	for _, attr := range n.Attr {
+		if attr.Key == "class" {
+			return strings.Contains(attr.Val, className)
+		}
+	}
+	return false
+}
+
+// Helper function to check if node is within reading content
+func isInReadingContent(n *html.Node) bool {
+	current := n.Parent
+	for current != nil {
+		if current.Type == html.ElementNode && current.Data == "div" {
+			for _, attr := range current.Attr {
+				if attr.Key == "class" && strings.Contains(attr.Val, "reading-content") {
+					return true
+				}
+			}
+		}
+		current = current.Parent
+	}
+	return false
+}
+
+// Helper function to get proper image extension
+func getImageExtension(imgURL string) string {
+	// Extract extension from URL, default to .jpg
+	parts := strings.Split(imgURL, ".")
+	if len(parts) > 1 {
+		ext := "." + parts[len(parts)-1]
+		// Remove query parameters
+		if strings.Contains(ext, "?") {
+			ext = strings.Split(ext, "?")[0]
+		}
+		// Validate common image extensions
+		validExts := []string{".jpg", ".jpeg", ".png", ".webp", ".gif"}
+		for _, validExt := range validExts {
+			if strings.EqualFold(ext, validExt) {
+				return ext
+			}
+		}
+	}
+	return ".jpg" // Default extension
 }

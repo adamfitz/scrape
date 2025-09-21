@@ -6,6 +6,7 @@ import (
 	"os"
 	"scrape/asura"
 	"scrape/cfotz"
+	"scrape/cfproxy"
 	"scrape/hls"
 	"scrape/iluim"
 	"scrape/kunmanga"
@@ -19,6 +20,7 @@ import (
 	"scrape/xbato"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -66,16 +68,50 @@ var manhuausCmd = &cobra.Command{
 var kunmangaCmd = &cobra.Command{
 	Use:   "kunmanga",
 	Short: "Scrape chapters from KunManga",
-	Long:  `Download manga chapters from KunManga website using shortname`,
+	Long:  `Download manga chapters from KunManga website using shortname with optional Cloudflare bypass`,
 	Run: func(cmd *cobra.Command, args []string) {
 		shortName, _ := cmd.Flags().GetString("shortname")
 		start, _ := cmd.Flags().GetInt("start")
 		end, _ := cmd.Flags().GetInt("end")
+		useProxy, _ := cmd.Flags().GetBool("bypass-cf")
+		proxyPort, _ := cmd.Flags().GetInt("proxy-port")
 
 		if shortName == "" {
 			fmt.Println("Error: --shortname flag is required")
 			cmd.Usage()
 			os.Exit(1)
+		}
+
+		// Start CF proxy if requested
+		var proxy *cfproxy.ProxyServer
+		if useProxy {
+			fmt.Println("🚀 Starting Cloudflare bypass proxy...")
+			proxy = cfproxy.NewProxyServer(proxyPort)
+			err := proxy.Start()
+			if err != nil {
+				fmt.Printf("❌ Failed to start proxy: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Give proxy time to start
+			time.Sleep(2 * time.Second)
+
+			// Test the proxy with a KunManga URL
+			testURL := fmt.Sprintf("https://kunmanga.com/manga/%s", shortName)
+			fmt.Printf("🧪 Testing proxy with %s...\n", testURL)
+			if err := cfproxy.TestFetch(proxyPort, testURL); err != nil {
+				fmt.Printf("❌ Proxy test failed: %v\n", err)
+				proxy.Stop()
+				os.Exit(1)
+			}
+
+			fmt.Println("✅ Cloudflare bypass proxy ready!")
+
+			// Ensure cleanup on exit
+			defer func() {
+				fmt.Println("🛑 Stopping Cloudflare bypass proxy...")
+				proxy.Stop()
+			}()
 		}
 
 		type Chapter struct {
@@ -84,7 +120,22 @@ var kunmangaCmd = &cobra.Command{
 			Number int
 		}
 
-		chapterURLs := kunmanga.KunMangaChapterUrls(shortName)
+		// Get chapter URLs - use proxy if enabled
+		var chapterURLs []string
+		if useProxy {
+			fmt.Println("📡 Fetching chapter list through CF proxy...")
+			chapterURLs = kunmanga.KunMangaChapterUrlsWithProxy(shortName, proxyPort)
+		} else {
+			chapterURLs = kunmanga.KunMangaChapterUrls(shortName)
+		}
+
+		if len(chapterURLs) == 0 {
+			fmt.Println("⚠️  No chapters found for manga:", shortName)
+			os.Exit(1)
+		}
+
+		fmt.Printf("📚 Found %d chapters for %s\n", len(chapterURLs), shortName)
+
 		var filtered []Chapter
 
 		for _, chapterUrl := range chapterURLs {
@@ -92,20 +143,22 @@ var kunmangaCmd = &cobra.Command{
 			chapterSlug := parts[len(parts)-1]
 			chNum := kunmanga.ParseChapterNumber(chapterSlug)
 
+			// Filter by range if specified
 			if start != 0 && end != 0 {
 				if chNum < start || chNum > end {
-					log.Printf("[MAIN] Skipping chapter %s (number %d): outside range %d-%d", chapterSlug, chNum, start, end)
+					log.Printf("[FILTER] Skipping chapter %s (number %d): outside range %d-%d", chapterSlug, chNum, start, end)
 					continue
 				}
 			}
 
+			// Check if CBZ already exists
 			exists, err := parser.CBZExists(chNum)
 			if err != nil {
-				log.Printf("[MAIN] Kunmanga error checking CBZ for chapter %d: %v", chNum, err)
+				log.Printf("[ERROR] Error checking CBZ for chapter %d: %v", chNum, err)
 				continue
 			}
 			if exists {
-				log.Printf("[MAIN] Kunmanga skipping chapter %d: CBZ already exists", chNum)
+				log.Printf("[SKIP] Chapter %d already exists", chNum)
 				continue
 			}
 
@@ -116,17 +169,42 @@ var kunmangaCmd = &cobra.Command{
 			})
 		}
 
+		if len(filtered) == 0 {
+			fmt.Println("ℹ️  No new chapters to download (all exist or filtered out)")
+			return
+		}
+
+		// Sort chapters by number (ascending)
 		sort.Slice(filtered, func(i, j int) bool {
 			return filtered[i].Number < filtered[j].Number
 		})
 
-		for _, ch := range filtered {
-			fmt.Printf("Downloading chapter %d (%s)...\n", ch.Number, ch.Slug)
-			err := kunmanga.DownloadKunMangaChapters(ch.URL, ch.Number)
-			if err != nil {
-				log.Printf("[MAIN] Error downloading chapter %s: %v", ch.Slug, err)
+		fmt.Printf("📥 Will download %d chapters\n", len(filtered))
+
+		// Download each chapter
+		for i, ch := range filtered {
+			fmt.Printf("📖 [%d/%d] Downloading chapter %d (%s)...\n",
+				i+1, len(filtered), ch.Number, ch.Slug)
+
+			var err error
+			if useProxy {
+				// Use proxy-enabled download
+				err = kunmanga.DownloadKunMangaChaptersWithProxy(ch.URL, ch.Number, proxyPort)
+			} else {
+				// Use regular download
+				err = kunmanga.DownloadKunMangaChapters(ch.URL, ch.Number)
 			}
+
+			if err != nil {
+				log.Printf("[ERROR] Failed to download chapter %s: %v", ch.Slug, err)
+				fmt.Printf("❌ Failed to download chapter %d, continuing...\n", ch.Number)
+				continue
+			}
+
+			fmt.Printf("✅ Successfully downloaded chapter %d\n", ch.Number)
 		}
+
+		fmt.Printf("🎉 Completed! Downloaded %d chapters for %s\n", len(filtered), shortName)
 	},
 }
 
@@ -314,6 +392,10 @@ func init() {
 	kunmangaCmd.Flags().String("shortname", "", "Shortname for the manga (required)")
 	kunmangaCmd.Flags().Int("start", 0, "Start chapter number (optional)")
 	kunmangaCmd.Flags().Int("end", 0, "End chapter number (optional)")
+
+	// New CF proxy flags
+	kunmangaCmd.Flags().Bool("bypass-cf", false, "Use Cloudflare bypass proxy")
+	kunmangaCmd.Flags().Int("proxy-port", 23181, "Port for the Cloudflare bypass proxy")
 
 	xbatoCmd.Flags().String("shortname", "", "Shortname for the manga (required)")
 }
