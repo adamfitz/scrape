@@ -14,6 +14,7 @@ import (
 	"scrape/mgeko"
 	"scrape/orv"
 	"scrape/parser"
+	"scrape/ravenscans"
 	"scrape/rizzfables"
 	"scrape/stonescape"
 	"scrape/xbato"
@@ -74,6 +75,12 @@ func main() {
 	}
 
 	if *urlFlag == "" && *siteName == "asura" {
+		fmt.Println("Error: --url flag is required")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if *urlFlag == "" && *siteName == "ravenscans" {
 		fmt.Println("Error: --url flag is required")
 		flag.Usage()
 		os.Exit(1)
@@ -226,5 +233,8 @@ func main() {
 	case "asura":
 		fmt.Printf("Starting download from asuracomics for: %s\n", *urlFlag)
 		asura.DownloadChapters(*urlFlag)
+	case "ravenscans":
+		fmt.Printf("Starting download from ravenscans for: %s\n", *urlFlag)
+		ravenscans.DownloadMangaChapters(*urlFlag)
 	}
 }

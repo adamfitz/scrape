@@ -612,3 +612,30 @@ func CleanupTempDirs(tempDirs *[]string) {
 		}
 	}()
 }
+
+// Create file name, takes the resulting chapter number from either the URL or a list (must be a number in string format)
+func CreateFilename(inputChapterNumber string) string {
+	// Normalize the string: replace '-' and '_' with '.'
+	normalized := strings.ReplaceAll(inputChapterNumber, "-", ".")
+	normalized = strings.ReplaceAll(normalized, "_", ".")
+
+	// Try parsing as float
+	inputChapter, err := strconv.ParseFloat(normalized, 64)
+	if err != nil {
+		log.Printf("[ERROR ravenscans] - CreateFilename() - cannot parse chapter number %q: %v", inputChapterNumber, err)
+		return "ch000.cbz"
+	}
+
+	// Pad integer part to 3 digits
+	intPart := int(inputChapter)
+	padded := fmt.Sprintf("%03d", intPart)
+
+	// If it’s a whole number, no decimal
+	if inputChapter == float64(intPart) {
+		return "ch" + padded + ".cbz"
+	}
+
+	// Otherwise keep decimal (remove trailing zeros)
+	chapterNum := fmt.Sprintf("ch%s.cbz", strings.TrimSuffix(strings.TrimSuffix(fmt.Sprintf("%03.2f", inputChapter), "0"), "."))
+	return chapterNum
+}
