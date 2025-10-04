@@ -14,6 +14,7 @@ import (
 	"scrape/mgeko"
 	"scrape/orv"
 	"scrape/parser"
+	"scrape/pmeig"
 	"scrape/ravenscans"
 	"scrape/rizzfables"
 	"scrape/stonescape"
@@ -300,6 +301,17 @@ var ravenscansCmd = &cobra.Command{
 
 		fmt.Printf("Starting download from ravenscans for: %s\n", url)
 		ravenscans.DownloadMangaChapters(url)
+	},
+}
+
+// RavensPick me up infinite gatchaans command
+var pmuigCmd = &cobra.Command{
+	Use:   "pmuig",
+	Short: "Scrape chapters from Pick me up infinite gatcha",
+	Long:  `Download manga chapters from Pick me up infinite gatcha website`,
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("Starting download from pick me up infinite gatcha\n")
+		pmuig.DownloadChapters()
 	},
 }
 
