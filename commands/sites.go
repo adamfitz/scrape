@@ -8,6 +8,7 @@ import (
 	"scrape/cfotz"
 	"scrape/hls"
 	"scrape/iluim"
+	"scrape/khinsider"
 	"scrape/kunmanga"
 	"scrape/manhuaus"
 	"scrape/mgeko"
@@ -302,6 +303,45 @@ var ravenscansCmd = &cobra.Command{
 	},
 }
 
+// khinsider commands (this is a video game MUSIC site)
+var khinsiderCmd = &cobra.Command{
+	Use:   "khinsider",
+	Short: "Scrape albums from khinsider",
+	Long:  `Download video game OST from khinsider website`,
+	Run: func(cmd *cobra.Command, args []string) {
+		url, _ := cmd.Flags().GetString("url")
+		wantMp3, _ := cmd.Flags().GetBool("mp3")
+		wantFlac, _ := cmd.Flags().GetBool("flac")
+
+		// validation
+		if url == "" {
+			fmt.Println("Error: --url flag is required")
+			cmd.Usage()
+			os.Exit(1)
+		}
+		if !wantMp3 && !wantFlac {
+			fmt.Println("Error: --mp3 or --flac flag is required")
+			cmd.Usage()
+			os.Exit(1)
+		}
+		if wantMp3 && wantFlac {
+			fmt.Println("Error: choose either --mp3 or --flac (not both)")
+			cmd.Usage()
+			os.Exit(1)
+		}
+
+		// run
+		if wantMp3 {
+			log.Printf("Starting MP3 scrape from khinsider: %s", url)
+			khinsider.DownloadAlbum(url, "mp3")
+		}
+		if wantFlac {
+			log.Printf("Starting FLAC scrape from khinsider: %s", url)
+			khinsider.DownloadAlbum(url, "flac")
+		}
+	},
+}
+
 func init() {
 	// Add flags to commands that need them
 	manhuausCmd.Flags().String("url", "", "Chapter URL to scrape (required)")
@@ -316,4 +356,9 @@ func init() {
 	kunmangaCmd.Flags().Int("end", 0, "End chapter number (optional)")
 
 	xbatoCmd.Flags().String("shortname", "", "Shortname for the manga (required)")
+
+	khinsiderCmd.Flags().String("url", "", "Album URL to scrape (required)")
+	khinsiderCmd.Flags().Bool("mp3", false, "Download MP3 tracks")
+	khinsiderCmd.Flags().Bool("flac", false, "Download FLAC tracks")
+
 }
