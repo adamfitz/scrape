@@ -35,5 +35,6 @@ func init() {
 	rootCmd.AddCommand(stonescapeCmd)
 	rootCmd.AddCommand(asuraCmd)
 	rootCmd.AddCommand(ravenscansCmd)
+	rootCmd.AddCommand(pmuigCmd)
 	rootCmd.AddCommand(khinsiderCmd)
 }
