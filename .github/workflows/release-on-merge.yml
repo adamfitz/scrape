@@ -25,7 +25,7 @@ jobs:
           create_annotated_tag: true
           fetch_all_tags: true
 
-      # Debug outputs to see which field is actually set
+      # Debug outputs
       - name: Debug tag-action outputs
         run: |
           echo "new_tag=${{ steps.tag_version.outputs.new_tag }}"
@@ -39,7 +39,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v5
         with:
           version: latest
-          args: release --rm-dist
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.SEMVERPAT }}
           GORELEASER_CURRENT_TAG: ${{ steps.tag_version.outputs.new_tag || steps.tag_version.outputs.tag }}
