@@ -10,8 +10,9 @@ import (
 
 	"net/http"
 	"path/filepath"
-	"scrape/parser"
-	"scrape/webClient"
+
+	"github.com/adamfitz/scrape/parser"
+	"github.com/adamfitz/scrape/webClient"
 
 	"github.com/PuerkitoBio/goquery"
 )

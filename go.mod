@@ -1,4 +1,4 @@
-module scrape
+module github.com/adamfitz/scrape
 
 go 1.24.3
 

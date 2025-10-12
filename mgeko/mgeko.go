@@ -6,8 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"scrape/parser"
 	"strings"
+
+	"github.com/adamfitz/scrape/parser"
 
 	"github.com/gocolly/colly"
 )

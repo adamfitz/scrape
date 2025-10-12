@@ -6,9 +6,6 @@ import (
 	"archive/zip"
 	"context"
 	"fmt"
-	"github.com/chromedp/chromedp"
-	"github.com/gocolly/colly"
-	_ "golang.org/x/image/webp"
 	"image"
 	_ "image/gif"
 	"image/jpeg"
@@ -20,11 +17,16 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"scrape/parser"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/adamfitz/scrape/parser"
+
+	"github.com/chromedp/chromedp"
+	"github.com/gocolly/colly"
+	_ "golang.org/x/image/webp"
 )
 
 func extractChapterNumber(href string) string {

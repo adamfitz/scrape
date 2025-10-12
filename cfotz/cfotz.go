@@ -5,9 +5,10 @@ import (
 	"html"
 	"log"
 	"regexp"
-	"scrape/parser"
-	"scrape/webClient"
 	"strings"
+
+	"github.com/adamfitz/scrape/parser"
+	"github.com/adamfitz/scrape/webClient"
 
 	"github.com/PuerkitoBio/goquery"
 )

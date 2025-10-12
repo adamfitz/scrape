@@ -11,9 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"scrape/parser"
 	"slices"
 	"strings"
+
+	"github.com/adamfitz/scrape/parser"
 
 	"github.com/chromedp/chromedp"
 	"github.com/gocolly/colly"
