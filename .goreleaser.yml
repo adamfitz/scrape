@@ -24,9 +24,4 @@ release:
   github:
     owner: adamfitz
     name: scrape
-    draft: false
-    prerelease: false
-    # token will be passed via CLI in the workflow, not env vars in the container
-
-cleanup:
-  keep: 3
+    # token will be passed via CLI in the workflow
