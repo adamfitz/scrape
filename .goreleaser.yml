@@ -1,0 +1,32 @@
+project_name: scrape
+
+builds:
+  - id: linux
+    main: .          # main package is in scrape.go at project root
+    goos:
+      - linux
+    goarch:
+      - amd64
+    ldflags:
+      - "-X github.com/adamfitz/scrape/version.Version={{ .Version }}"
+    binary: scrape
+
+archives:
+  - format: tar.gz
+    builds:
+      - linux
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+changelog:
+  use: git
+
+release:
+  github:
+    owner: adamfitz
+    name: scrape
+    draft: false
+    prerelease: false
+    # token will be passed via CLI in the workflow, not env vars in the container
+
+cleanup:
+  keep: 3
