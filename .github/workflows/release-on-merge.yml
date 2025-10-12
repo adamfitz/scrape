@@ -9,13 +9,15 @@ jobs:
   tag-and-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # 1. Checkout full repo with history and tags
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # needed so tags are visible
-          fetch-tags: true  # otherwise it wont ...
+          fetch-depth: 0
+          fetch-tags: true
 
-      # Calculate and push tag
-      - name: Calculate and Push Tag
+      # 2. Calculate tag
+      - name: Calculate Tag
         id: tag_version
         uses: mathieudutour/github-tag-action@v6.2
         with:
@@ -25,23 +27,25 @@ jobs:
           release_branches: master
           create_annotated_tag: true
           fetch_all_tags: true
-          push_tag: true   # ensures tag is on current commit
 
-      # Debug outputs
-      - name: Debug tag-action outputs
+      # 3. Debug
+      - name: Debug
         run: |
           echo "new_tag=${{ steps.tag_version.outputs.new_tag }}"
-          echo "tag=${{ steps.tag_version.outputs.tag }}"
-          echo "tag_created=${{ steps.tag_version.outputs.tag_created }}"
           echo "previous_tag=${{ steps.tag_version.outputs.previous_tag }}"
 
-      # Run GoReleaser only if a tag was actually created
+      # 4. Push tag so GoReleaser sees it
+      - name: Push Tag
+        if: steps.tag_version.outputs.new_tag != ''
+        run: git push origin ${{ steps.tag_version.outputs.new_tag }}
+
+      # 5. Run GoReleaser
       - name: Run GoReleaser
-        if: steps.tag_version.outputs.new_tag != '' || steps.tag_version.outputs.tag != ''
+        if: steps.tag_version.outputs.new_tag != ''
         uses: goreleaser/goreleaser-action@v5
         with:
           version: latest
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.SEMVERPAT }}
-          GORELEASER_CURRENT_TAG: ${{ steps.tag_version.outputs.new_tag || steps.tag_version.outputs.tag }}
+          GORELEASER_CURRENT_TAG: ${{ steps.tag_version.outputs.new_tag }}
