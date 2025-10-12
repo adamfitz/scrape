@@ -37,4 +37,5 @@ func init() {
 	rootCmd.AddCommand(ravenscansCmd)
 	rootCmd.AddCommand(pmuigCmd)
 	rootCmd.AddCommand(khinsiderCmd)
+	rootCmd.AddCommand(versionNumber)
 }

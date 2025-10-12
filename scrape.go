@@ -1,9 +1,9 @@
 package main
 
 import (
+	"github.com/adamfitz/scrape/commands"
 	"log"
 	"os"
-	"github.com/adamfitz/scrape/commands"
 )
 
 func init() {
