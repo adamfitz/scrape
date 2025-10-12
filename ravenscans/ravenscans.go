@@ -14,11 +14,12 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"scrape/parser"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/adamfitz/scrape/parser"
 
 	"github.com/chai2010/webp"
 	"github.com/chromedp/chromedp"

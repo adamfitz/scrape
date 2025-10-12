@@ -2,6 +2,7 @@ package manhuaus
 
 import (
 	"archive/zip"
+	"bytes"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -16,11 +17,11 @@ import (
 	"strings"
 	"time"
 
-	"bytes"
+	"github.com/adamfitz/scrape/webClient"
+
 	"github.com/PuerkitoBio/goquery"
 	"github.com/gocolly/colly"
 	"golang.org/x/image/webp" // Add support for decoding webp
-	"scrape/webClient"
 )
 
 // ChapterInfo holds chapter URL and number

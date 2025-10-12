@@ -14,13 +14,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"scrape/parser"
-	"scrape/webClient"
 	"strings"
 
-	"github.com/chai2010/webp"
+	"github.com/adamfitz/scrape/parser"
+	"github.com/adamfitz/scrape/webClient"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/chai2010/webp"
 	// register WEBP decoder, add module
 )
 

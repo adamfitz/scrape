@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"log"
 	"regexp"
-	"scrape/parser"
 	"strings"
 	"time"
+
+	"github.com/adamfitz/scrape/parser"
 
 	"github.com/chromedp/chromedp"
 )

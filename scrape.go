@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 	"os"
-	"scrape/commands"
+	"github.com/adamfitz/scrape/commands"
 )
 
 func init() {

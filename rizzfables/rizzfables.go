@@ -11,12 +11,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"scrape/parser"
 	"strconv"
 	"strings"
 
+	"github.com/adamfitz/scrape/parser"
+
 	"github.com/chromedp/chromedp"
-	//"github.com/chromedp/cdproto/input"
 
 	"github.com/chai2010/webp"
 	"github.com/chromedp/cdproto/network"

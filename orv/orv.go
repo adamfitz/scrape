@@ -6,9 +6,10 @@ import (
 	"github.com/gocolly/colly"
 	"log"
 	"os"
-	"scrape/parser"
 	"strconv"
 	"strings"
+
+	"github.com/adamfitz/scrape/parser"
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"

@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"scrape/parser"
+	"github.com/adamfitz/scrape/parser"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/chai2010/webp"
