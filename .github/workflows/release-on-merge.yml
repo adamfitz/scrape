@@ -17,9 +17,11 @@ jobs:
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.SEMVERPAT }}
-          push: true
           tag_prefix: v
           default_bump: patch
+          release_branches: master
+          create_annotated_tag: true
+          fetch_all_tags: true
 
       # Check if tag was pushed successfully
       - name: Determine if GoReleaser Should Run
