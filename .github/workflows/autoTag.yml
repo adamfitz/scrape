@@ -13,4 +13,5 @@ jobs:
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          default_bump: initial # starts veriosn tag at 1.0.0 (assuming no tags already exist)
+          tag_prefix: v
+          default_bump: patch
