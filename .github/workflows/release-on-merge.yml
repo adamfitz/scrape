@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed so tags are visible
 
       # Calculate and push tag
       - name: Calculate and Push Tag
@@ -23,11 +25,21 @@ jobs:
           create_annotated_tag: true
           fetch_all_tags: true
 
+      # Debug outputs to see which field is actually set
+      - name: Debug tag-action outputs
+        run: |
+          echo "new_tag=${{ steps.tag_version.outputs.new_tag }}"
+          echo "tag=${{ steps.tag_version.outputs.tag }}"
+          echo "tag_created=${{ steps.tag_version.outputs.tag_created }}"
+          echo "previous_tag=${{ steps.tag_version.outputs.previous_tag }}"
+
       # Run GoReleaser only if a tag was actually created
       - name: Run GoReleaser
-        if: steps.tag_version.outputs.tag != ''
+        if: steps.tag_version.outputs.new_tag != '' || steps.tag_version.outputs.tag != ''
         uses: goreleaser/goreleaser-action@v5
         with:
           version: latest
           args: release --rm-dist
-          github_token: ${{ secrets.SEMVERPAT }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.SEMVERPAT }}
+          GORELEASER_CURRENT_TAG: ${{ steps.tag_version.outputs.new_tag || steps.tag_version.outputs.tag }}
