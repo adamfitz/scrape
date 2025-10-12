@@ -24,6 +24,7 @@ jobs:
           release_branches: master
           create_annotated_tag: true
           fetch_all_tags: true
+          push_tag: true   # ensures tag is on current commit
 
       # Debug outputs
       - name: Debug tag-action outputs
