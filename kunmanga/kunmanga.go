@@ -13,6 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/adamfitz/scrape/cf"
+	"github.com/PuerkitoBio/goquery"
 )
 
 // Download image from URL and save to disk
@@ -80,8 +83,6 @@ func KunMangaChapterUrls(mangaName string) []string {
 }
 
 // DownloadKunMangaChapters downloads chapter images to temp, zips to CBZ, cleans up.
-// Returns error on failure.
-// DownloadKunMangaChapters downloads chapter images to temp, zips to CBZ, cleans up.
 // Saves CBZ as ch<num>.cbz in current directory. Returns error on failure.
 func DownloadKunMangaChapters(url string, chapterNumber int) error {
 	tempDir := filepath.Join(os.TempDir(), "chapter-dl")
@@ -89,37 +90,47 @@ func DownloadKunMangaChapters(url string, chapterNumber int) error {
 	chapterTempDir := filepath.Join(tempDir, chapterSlug)
 
 	log.Printf("[INFO] Starting download for chapter %s", chapterSlug)
-
-	err := os.MkdirAll(chapterTempDir, 0755)
-	if err != nil {
+	if err := os.MkdirAll(chapterTempDir, 0755); err != nil {
 		return fmt.Errorf("[ERROR] Failed to create temp directory %s: %w", chapterTempDir, err)
 	}
 
-	c := colly.NewCollector(
-		colly.AllowedDomains("kunmanga.com"),
-	)
-	c.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-
 	var imageURLs []string
+	var cfCookies []cf.SavedCookie
 
-	c.OnHTML("div.reading-content img", func(e *colly.HTMLElement) {
-		imgURL := strings.TrimSpace(e.Attr("src"))
-		if imgURL != "" {
-			imageURLs = append(imageURLs, imgURL)
+	// Always open Chrome unless we have valid CF cookies
+	if !cf.AreCookiesValid(cfCookies) {
+		chromePath, err := cf.FindChromeExec()
+		if err != nil {
+			log.Fatalf("[ERROR] Could not find Chrome: %v", err)
+		}
+
+		cfCookies, err = cf.SpawnChromeAndCollectCFCookies(chromePath, "", url, 5*time.Minute)
+		if err != nil {
+			log.Fatalf("[ERROR] Failed to collect CF cookies: %v", err)
+		}
+
+		log.Printf("[INFO] Collected %d CF cookies", len(cfCookies))
+	}
+
+	// Use CF cookies to fetch chapter page
+	resp, err := cf.DoRequestWithCFCookies(cfCookies, url)
+	if err != nil {
+		return fmt.Errorf("[ERROR] Failed to fetch chapter page: %w", err)
+	}
+	defer resp.Body.Close()
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return fmt.Errorf("[ERROR] Failed to parse chapter page HTML: %w", err)
+	}
+
+	doc.Find("div.reading-content img").Each(func(_ int, s *goquery.Selection) {
+		if src, exists := s.Attr("src"); exists {
+			imageURLs = append(imageURLs, strings.TrimSpace(src))
 		}
 	})
 
-	c.OnRequest(func(r *colly.Request) {
-		log.Printf("[INFO] Visiting %s", r.URL.String())
-	})
-
-	err = c.Visit(url)
-	if err != nil {
-		return fmt.Errorf("[ERROR] Failed to visit page %s: %w", url, err)
-	}
-
 	if len(imageURLs) == 0 {
-		log.Printf("[WARN] No images found for chapter %s", chapterSlug)
 		return errors.New("no images found on chapter page")
 	}
 
@@ -127,51 +138,33 @@ func DownloadKunMangaChapters(url string, chapterNumber int) error {
 	for i, imgURL := range imageURLs {
 		outputPath := filepath.Join(chapterTempDir, fmt.Sprintf("%03d%s", i+1, filepath.Ext(imgURL)))
 		var lastErr error
-
 		for attempt := 1; attempt <= 3; attempt++ {
 			log.Printf("[INFO] Downloading image %d/%d: %s (attempt %d)", i+1, len(imageURLs), imgURL, attempt)
 			lastErr = downloadKunMangaImage(imgURL, outputPath, url)
 			if lastErr == nil {
-				log.Printf("[INFO] Successfully downloaded %s", imgURL)
 				break
 			}
-			log.Printf("[WARN] Failed to download %s on attempt %d: %v", imgURL, attempt, lastErr)
-			time.Sleep(time.Duration(attempt*2) * time.Second) // Exponential backoff
+			time.Sleep(time.Duration(attempt*2) * time.Second)
 		}
-
 		if lastErr != nil {
-			log.Printf("[ERROR] Giving up on image %s after 3 attempts: %v", imgURL, lastErr)
 			return fmt.Errorf("failed to download image %s: %w", imgURL, lastErr)
 		}
 	}
 
-	// Create CBZ file as ch<num>.cbz in current directory
-	outputDir := "."
-	var cbzName string
-	if chapterNumber < 10 {
-		cbzName = fmt.Sprintf("ch%02d.cbz", chapterNumber)
-	} else {
-		cbzName = fmt.Sprintf("ch%d.cbz", chapterNumber)
-	}
-	cbzPath := filepath.Join(outputDir, cbzName)
-
-	err = createCBZFromDir(cbzPath, chapterTempDir)
-	if err != nil {
-		return fmt.Errorf("[ERROR] Failed to create CBZ %s: %w", cbzPath, err)
-	}
-	log.Printf("[INFO] Created CBZ archive %s", cbzPath)
-
-	// Cleanup temp files
-	err = os.RemoveAll(chapterTempDir)
-	if err != nil {
-		log.Printf("[WARN] Failed to remove temp directory %s: %v", chapterTempDir, err)
-	} else {
-		log.Printf("[INFO] Removed temp directory %s", chapterTempDir)
+	// Create CBZ
+	cbzName := fmt.Sprintf("ch%02d.cbz", chapterNumber)
+	cbzPath := filepath.Join(".", cbzName)
+	if err := createCBZFromDir(cbzPath, chapterTempDir); err != nil {
+		return fmt.Errorf("failed to create CBZ %s: %w", cbzPath, err)
 	}
 
+	_ = os.RemoveAll(chapterTempDir)
 	log.Printf("[INFO] Finished download for chapter %s", chapterSlug)
 	return nil
 }
+
+
+
 
 // createCBZFromDir zips all files from srcDir into a zip file at cbzPath
 func createCBZFromDir(cbzPath, srcDir string) error {

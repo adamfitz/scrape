@@ -4,6 +4,8 @@ import (
 	"github.com/adamfitz/scrape/commands"
 	"log"
 	"os"
+
+	"github.com/adamfitz/scrape/cf"
 )
 
 func init() {
@@ -12,6 +14,12 @@ func init() {
 		log.Fatalf("Failed to open log file: %v", err)
 	}
 	log.SetOutput(logFile)
+
+	chromeLocation, browserErr := cf.FindChromeExec()
+	if browserErr != nil {
+		log.Printf("chrome browser not found, %v", browserErr)
+	}
+	log.Printf("Found chrome binary at: %s", chromeLocation)
 }
 
 func main() {

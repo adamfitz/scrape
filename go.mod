@@ -2,6 +2,8 @@ module github.com/adamfitz/scrape
 
 go 1.24.3
 
+replace github.com/adamfitz/scrape/cf => ./cf
+
 require (
 	github.com/PuerkitoBio/goquery v1.10.3
 	github.com/chai2010/webp v1.4.0
