@@ -9,9 +9,10 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "scrape",
-	Short: "A manga scraping tool",
-	Long: `A command-line tool for scraping manga chapters from various websites.
-Supports multiple manga sites with different download options.`,
+	Short: "A manga and media lookup tool",
+	Long: `A command-line tool for looking up manga, manhwa, light novels,
+and other media via the MangaDex API. Results are cached in a local
+SQLite database for fast repeated lookups.`,
 }
 
 func Execute() {
@@ -22,20 +23,10 @@ func Execute() {
 }
 
 func init() {
-	// Add all site-specific commands
-	rootCmd.AddCommand(manhuausCmd)
-	rootCmd.AddCommand(kunmangaCmd)
-	rootCmd.AddCommand(xbatoCmd)
-	rootCmd.AddCommand(iluimCmd)
-	rootCmd.AddCommand(orvCmd)
-	rootCmd.AddCommand(rizzfablesCmd)
-	rootCmd.AddCommand(hlsCmd)
-	rootCmd.AddCommand(mgekoCmd)
-	rootCmd.AddCommand(cfotzCmd)
-	rootCmd.AddCommand(stonescapeCmd)
-	rootCmd.AddCommand(asuraCmd)
-	rootCmd.AddCommand(ravenscansCmd)
-	rootCmd.AddCommand(pmuigCmd)
+	rootCmd.AddCommand(lookupCmd)
+	rootCmd.AddCommand(batchCmd)
+	rootCmd.AddCommand(backupCmd)
+	rootCmd.AddCommand(maintenanceCmd)
 	rootCmd.AddCommand(khinsiderCmd)
 	rootCmd.AddCommand(versionNumber)
 }
