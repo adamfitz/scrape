@@ -112,11 +112,11 @@ var normalizeCmd = &cobra.Command{
 		}
 
 		fmt.Println("Normalising titles...")
-		updated, err := p.NormalizeAllTitles()
+		stats, err := p.NormalizeAllTitles()
 		if err != nil {
 			return fmt.Errorf("normalize: %w", err)
 		}
-		fmt.Printf("Updated %d title(s).\n", updated)
+		fmt.Printf("Indexed %d record(s) (%d updated)\n", stats.Indexed, stats.Updated)
 		return nil
 	},
 }

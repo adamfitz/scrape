@@ -68,7 +68,7 @@ When `--local` is set, the API SHALL NOT be called. Only the local database is q
 - GIVEN 721 titles input
 - WHEN `scrape batch titles.txt -l` is executed
 - THEN all 721 titles SHALL be checked against the local database
-- AND the summary SHALL show: Found (cached), Not found
+- AND the summary SHALL show DB, Fuzzy, ambiguous, and not-found counts
 - AND NO API calls SHALL be made
 
 ### Requirement: Progress display
@@ -88,16 +88,28 @@ Individual title failures SHALL not abort the batch.
 After processing, a summary line SHALL be displayed:
 
 ```
-Summary: Found: N, Cached: N, Not found: N
+---
+713 processed — 630 found (DB: 600, Fuzzy: 30, API: 0), 11 fuzzy (multiple), 47 not found
+  → Fuzzy (multiple): run `scrape lookup "<title>"` for each to disambiguate
+  → Not found: not on MangaDex — check manually or skip
+---
 ```
 
-- `Found` = total found (cached + API)
-- `Cached` = found in local database
-- `Not found` = not found anywhere
+- `DB` = exact match via title_index
+- `Fuzzy` = single fuzzy match auto-linked via `LinkQuery` (reuses existing record)
+- `API` = found and ingested from MangaDex
+- `fuzzy (multiple)` = multiple fuzzy candidates — user must disambiguate via `scrape lookup`
+- `not found` = not found in DB or MangaDex
+
+Actionable hints SHALL be printed when ambiguous or not-found counts are > 0.
 
 ### Requirement: Source indicator
 
-Each result line SHALL indicate `[db]` or `[api]`.
+Each result line SHALL indicate `[db]`, `[fuzzy]`, or `[api]`.
+
+- `[db]` — exact match via title_index
+- `[fuzzy]` — single fuzzy match (auto-linked) or `[fuzzy] [fuzzy multiple]` for ambiguous matches
+- `[api]` — match via MangaDex API
 
 ### Requirement: Default output (minimal)
 
@@ -125,7 +137,7 @@ When a manga is found via the MangaDex API, the tool SHALL check if a record wit
 
 ### Requirement: Result validation
 
-The tool SHALL NOT blindly accept the first MangaDex result. For each title, the tool SHALL iterate through the returned results and only accept a result where the normalized query appears as a substring in at least one of the result's titles (primary + alt titles, after normalization). If no result matches, the title SHALL be reported as not found and SHALL NOT be stored.
+The tool SHALL NOT blindly accept the first MangaDex result. For each title, the tool SHALL iterate through the returned results and only accept a result where the normalized query appears as a substring in at least one of the result's titles (primary + alt titles, after normalization). If no result matches, the tool SHALL attempt fuzzy similarity matching (threshold >= 0.85) as a 4th strategy. If no result matches even fuzzily, the title SHALL be reported as not found and SHALL NOT be stored.
 
 #### Scenario: MangaDex returns wrong match
 
@@ -172,3 +184,61 @@ When `--show-unmatched` is set, the tool SHALL print a section after the summary
 - GIVEN `--local` and `--show-unmatched` are both set
 - WHEN the batch completes
 - THEN the unmatched section SHALL list all titles not found in the local database
+
+### Requirement: Fuzzy fallback for missing titles
+
+After the exact-match batch query, titles not found in the title_index SHALL be checked against all stored titles using fuzzy similarity scoring. The fuzzy scan runs before any API calls.
+
+- **Single fuzzy match** (score >= 0.85): auto-link via `LinkQuery` and emit `LookupResult{Media, Source: SourceFuzzy}`. The existing record is reused — no new ingestion.
+- **Multiple fuzzy matches** (score >= 0.85): emit `LookupResult{Source: SourceFuzzy, Candidates: [...]}` for user disambiguation.
+- **No fuzzy matches**: title is sent to the MangaDex API (unless `--local` mode).
+
+#### Scenario: Single fuzzy match auto-link
+
+- GIVEN the database stores `"Yuusha Party"` (media_id=X)
+- AND the input contains `"Yusha Party"` (typo)
+- WHEN batch processes this title
+- THEN tier 1 exact match SHALL miss
+- AND fuzzy scan SHALL find the match (score >= 0.85)
+- AND `LinkQuery` SHALL add index entry for the user's query
+- AND the existing record SHALL be reused (no new ingestion)
+- AND the result SHALL be displayed as `[fuzzy] Yuusha Party`
+
+#### Scenario: Multiple fuzzy matches require disambiguation
+
+- GIVEN the database stores two titles similar to the input
+- WHEN batch processes this title
+- AND fuzzy scan finds multiple matches above threshold
+- THEN the batch SHALL pause
+- AND display the candidates with scores
+- AND wait for user selection
+- AND after selection, link the result via `LinkQuery()`
+
+### Requirement: Fuzzy disambiguation prompt
+
+When multiple fuzzy candidates are found, the batch command SHALL display:
+
+```
+[N/M] Multiple matches for: <title>
+
+  [1] <candidate 1 title> (score: 0.XX)
+  [2] <candidate 2 title> (score: 0.XX)
+  [0] Skip
+
+Pick a number:
+```
+
+The batch SHALL wait for user input before continuing.
+
+### Requirement: Idempotent batch runs
+
+After the first successful batch run, subsequent runs with the same file SHALL find all titles via exact match (tier 1) — no fuzzy scanning, no API calls, no user interaction. The `LinkQuery` mechanism ensures that fuzzy-matched titles from previous runs are findable via exact match.
+
+#### Scenario: Second run is non-interactive
+
+- GIVEN the first batch run linked all fuzzy-matched titles via `LinkQuery()`
+- WHEN the same batch file is processed again
+- THEN ALL titles SHALL be found via `[db]` exact match
+- AND NO fuzzy candidates SHALL be returned
+- AND NO user prompts SHALL appear
+- AND the batch SHALL complete non-interactively

@@ -68,8 +68,9 @@ func (e *PipelineError) Unwrap() error {
 type Source string
 
 const (
-	SourceDB  Source = "db"
-	SourceAPI Source = "api"
+	SourceDB    Source = "db"
+	SourceAPI   Source = "api"
+	SourceFuzzy Source = "fuzzy"
 )
 
 // AltTitleData is the structured format for multi-language title variants.
@@ -158,12 +159,12 @@ func (p *Pipeline) ensureTitleIndex() {
 	}
 }
 
-// DB returns the pipeline's database connection.
+// DB returns the pipeline's underlying database connection.
 func (p *Pipeline) DB() *database.DB {
 	return p.db
 }
 
-// Normalizer returns the pipeline's normaliser instance.
+// Normalizer returns the pipeline's normaliser instance for external callers.
 func (p *Pipeline) Normalizer() *normalize.Normalizer {
 	return p.normaliser
 }
@@ -190,6 +191,7 @@ func ParseAltTitles(raw string) AltTitleData {
 	return parseAltTitles(raw)
 }
 
+// allTitles returns the primary title plus all alt titles for a media record.
 func allTitles(m *database.Media) []string {
 	titles := []string{m.Title}
 	if m.AltTitle == "" {
@@ -211,6 +213,7 @@ func allTitles(m *database.Media) []string {
 	return titles
 }
 
+// normalizeAllTitles applies FoldUnicode to the title and alt_title for storage.
 func normalizeAllTitles(m *database.Media) (string, string) {
 	norm := normalize.FoldUnicode(m.Title)
 	altNorm := normalize.NormalizeAllTitlesJSON(m.AltTitle)
@@ -266,9 +269,33 @@ func queryMatchesAnyTitle(normalizedQuery string, result mangadex.MangaResult, n
 			}
 		}
 	}
+
+	// 4th strategy: fuzzy similarity
+	if normalizedQuery != "" {
+		fuzzyCheck := func(rawTitle string) bool {
+			normalized := n.MustNormalize(rawTitle)
+			if normalize.Similarity(normalizedQuery, normalized) >= 0.85 {
+				return true
+			}
+			return false
+		}
+		for _, t := range result.Attributes.Title {
+			if t != "" && fuzzyCheck(t) {
+				return true
+			}
+		}
+		for _, alt := range result.Attributes.AltTitles {
+			for _, t := range alt {
+				if t != "" && fuzzyCheck(t) {
+					return true
+				}
+			}
+		}
+	}
 	return false
 }
 
+// extractTitles pulls primary and alt titles from a MangaDex API result.
 func extractTitles(r mangadex.MangaResult) AltTitleData {
 	return AltTitleData{
 		Primary: r.Attributes.Title,
@@ -276,6 +303,7 @@ func extractTitles(r mangadex.MangaResult) AltTitleData {
 	}
 }
 
+// extractCandidate wraps a MangaDex result into a Candidate for user disambiguation.
 func extractCandidate(r mangadex.MangaResult, query string) Candidate {
 	titles := extractTitles(r)
 	b, _ := json.Marshal(titles)
@@ -291,6 +319,7 @@ func extractCandidate(r mangadex.MangaResult, query string) Candidate {
 	}
 }
 
+// ingestResult converts a MangaDex API result into a Media record and stores it.
 func (p *Pipeline) ingestResult(mediaType database.MediaType, query string, r mangadex.MangaResult) (*LookupResult, error) {
 	titles := extractTitles(r)
 	b, _ := json.Marshal(titles)
@@ -493,7 +522,41 @@ func (p *Pipeline) BatchLookupStream(mediaType database.MediaType, titles []stri
 			}
 		}
 
-		if len(missing) == 0 || opts.LocalOnly {
+		if len(missing) == 0 {
+			return
+		}
+
+		// Tier 2: Fuzzy scan against local DB before hitting API
+		var stillMissing []string
+		for _, title := range missing {
+			queryNorm := p.normaliser.MustNormalize(title)
+			candidates := p.fuzzyScan(mediaType, queryNorm, 0.85)
+			if len(candidates) == 0 {
+				stillMissing = append(stillMissing, title)
+				continue
+			}
+			if len(candidates) == 1 {
+				// Single fuzzy match — link query to existing record
+				_ = p.LinkQuery(mediaType, candidates[0].Media.ID, title)
+				ch <- LookupResult{Media: candidates[0].Media, Source: SourceFuzzy, Query: title}
+				continue
+			}
+			// Multiple fuzzy candidates — emit for disambiguation
+			cands := make([]Candidate, len(candidates))
+			for i, fc := range candidates {
+				cands[i] = Candidate{
+					Title:    fc.Title,
+					SourceID: fc.Media.SourceID,
+					Language: fc.Media.Language,
+					URL:      fc.Media.URL,
+					Status:   fc.Media.Status,
+					DescEn:   fc.Media.Description,
+				}
+			}
+			ch <- LookupResult{Source: SourceFuzzy, Query: title, Candidates: cands}
+		}
+
+		if opts.LocalOnly {
 			return
 		}
 
@@ -505,7 +568,7 @@ func (p *Pipeline) BatchLookupStream(mediaType database.MediaType, titles []stri
 			limit = 5
 		}
 
-		for _, title := range missing {
+		for _, title := range stillMissing {
 			apiQuery := QueryForAPI(title)
 			apiResults, err := client.SearchManga(apiQuery, limit)
 			if err != nil {
@@ -552,34 +615,123 @@ func (p *Pipeline) BatchLookupStream(mediaType database.MediaType, titles []stri
 	return ch
 }
 
-// NormalizeAllTitles re-normalises every title and alt_title across all
-// media tables and rebuilds the title index. Safe to run repeatedly (idempotent).
-func (p *Pipeline) NormalizeAllTitles() (int64, error) {
-	var totalUpdated int64
-
-	for _, mt := range database.AllMediaTypes() {
-		updated, err := p.normalizeTitlesForType(mt)
-		if err != nil {
-			return totalUpdated, err
-		}
-		totalUpdated += updated
-	}
-
-	return totalUpdated, nil
+// FuzzyCandidate represents a local DB record found by fuzzy matching.
+type FuzzyCandidate struct {
+	Media *database.Media
+	Score float64
+	Title string // the matched title string
 }
 
-func (p *Pipeline) normalizeTitlesForType(mediaType database.MediaType) (int64, error) {
+// FuzzyLookupResult is the result of a local fuzzy scan.
+type FuzzyLookupResult struct {
+	Exact     *database.Media  // exact index match (preferred)
+	Fuzzy     []FuzzyCandidate // candidates above fuzzy threshold
+	Query     string
+	QueryNorm string
+}
+
+// fuzzyScan scans allMedia for fuzzy matches against queryNorm.
+// Returns candidates sorted by score descending.
+func (p *Pipeline) fuzzyScan(mediaType database.MediaType, queryNorm string, threshold float64) []FuzzyCandidate {
 	all, err := p.db.AllMedia(mediaType)
 	if err != nil {
-		return 0, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("fetch all %s", mediaType.TableName()), Err: err}
+		return nil
+	}
+	var candidates []FuzzyCandidate
+	for i := range all {
+		titles := allTitles(&all[i])
+		for _, raw := range titles {
+			norm := p.normaliser.MustNormalize(raw)
+			score := normalize.Similarity(queryNorm, norm)
+			if score >= threshold {
+				candidates = append(candidates, FuzzyCandidate{
+					Media: &all[i],
+					Score: score,
+					Title: raw,
+				})
+				break // one match per media record is enough
+			}
+		}
+	}
+	// Sort by score descending (simple bubble — small N)
+	for i := 0; i < len(candidates); i++ {
+		for j := i + 1; j < len(candidates); j++ {
+			if candidates[j].Score > candidates[i].Score {
+				candidates[i], candidates[j] = candidates[j], candidates[i]
+			}
+		}
+	}
+	return candidates
+}
+
+// FuzzyLookup performs a local-only lookup with fuzzy fallback.
+// Returns the exact match if found, otherwise returns fuzzy candidates.
+func (p *Pipeline) FuzzyLookup(mediaType database.MediaType, query string, threshold float64) *FuzzyLookupResult {
+	queryNorm := p.normaliser.MustNormalize(query)
+	result := &FuzzyLookupResult{Query: query, QueryNorm: queryNorm}
+
+	// Try exact index match first
+	media, _ := p.Lookup(mediaType, query)
+	if media != nil {
+		result.Exact = media
+		return result
+	}
+
+	// Fuzzy scan
+	result.Fuzzy = p.fuzzyScan(mediaType, queryNorm, threshold)
+	return result
+}
+
+// LinkQuery links a fuzzy-matched title back to an existing media record by
+// inserting a secondary entry in the title index. This ensures subsequent
+// exact-match lookups find the record without re-scanning.
+func (p *Pipeline) LinkQuery(mediaType database.MediaType, mediaID int64, query string) error {
+	queryNorm := p.normaliser.MustNormalize(query)
+	if queryNorm == "" {
+		return nil
+	}
+	index := map[string]string{queryNorm: query}
+	return p.db.IndexTitles(mediaType, mediaID, index)
+}
+
+// NormalizeStats holds the result of a normalisation pass.
+type NormalizeStats struct {
+	Updated int64 // records whose title/alt_title column changed
+	Indexed int64 // records re-indexed in the title index
+}
+
+// NormalizeAllTitles re-normalises every title across all media types and
+// rebuilds the title index. Safe to run repeatedly (idempotent).
+func (p *Pipeline) NormalizeAllTitles() (NormalizeStats, error) {
+	var stats NormalizeStats
+
+	for _, mt := range database.AllMediaTypes() {
+		updated, indexed, err := p.normalizeTitlesForType(mt)
+		if err != nil {
+			return stats, err
+		}
+		stats.Updated += updated
+		stats.Indexed += indexed
+	}
+
+	return stats, nil
+}
+
+// normalizeTitlesForType re-normalises titles and rebuilds the index for one media type.
+// Returns (updated, indexed, error) where updated is records whose title changed
+// and indexed is the total records re-indexed.
+func (p *Pipeline) normalizeTitlesForType(mediaType database.MediaType) (int64, int64, error) {
+	all, err := p.db.AllMedia(mediaType)
+	if err != nil {
+		return 0, 0, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("fetch all %s", mediaType.TableName()), Err: err}
 	}
 
 	// Clear the index for this media type — we'll rebuild as we go
 	if err := p.db.RebuildTitleIndex(mediaType); err != nil {
-		return 0, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("rebuild index for %s", mediaType.TableName()), Err: err}
+		return 0, 0, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("rebuild index for %s", mediaType.TableName()), Err: err}
 	}
 
-	var updated int64
+	var updated, indexed int64
 	for i := range all {
 		newTitle := normalize.FoldUnicode(all[i].Title)
 		newAlt := normalize.NormalizeAllTitlesJSON(all[i].AltTitle)
@@ -587,25 +739,27 @@ func (p *Pipeline) normalizeTitlesForType(mediaType database.MediaType) (int64, 
 		if newTitle == all[i].Title && newAlt == all[i].AltTitle {
 			// Title unchanged, but still index it
 			if err := p.reindexMedia(mediaType, all[i].ID, &all[i]); err != nil {
-				return updated, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("reindex %s %d", mediaType.TableName(), all[i].ID), Err: err}
+				return updated, indexed, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("reindex %s %d", mediaType.TableName(), all[i].ID), Err: err}
 			}
+			indexed++
 			continue
 		}
 
 		all[i].Title = newTitle
 		all[i].AltTitle = newAlt
 		if err := p.db.UpdateMedia(&all[i]); err != nil {
-			return updated, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("update %s %d", mediaType.TableName(), all[i].ID), Err: err}
+			return updated, indexed, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("update %s %d", mediaType.TableName(), all[i].ID), Err: err}
 		}
 		if err := p.reindexMedia(mediaType, all[i].ID, &all[i]); err != nil {
-			return updated, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("reindex %s %d", mediaType.TableName(), all[i].ID), Err: err}
+			return updated, indexed, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("reindex %s %d", mediaType.TableName(), all[i].ID), Err: err}
 		}
 		updated++
+		indexed++
 	}
-	return updated, nil
+	return updated, indexed, nil
 }
 
-// QueryForAPI normalises a title for use as an API search query.
+// QueryForAPI normalises a title for use as a MangaDex API search query.
 func QueryForAPI(title string) string {
 	n := normalize.New(normalize.NormalizationConfig{})
 	q, _ := n.Normalize(title)
@@ -613,6 +767,7 @@ func QueryForAPI(title string) string {
 }
 
 // Deduplicate removes duplicate titles using normalised forms as keys.
+// Used to deduplicate input files before batch processing.
 func Deduplicate(titles []string) []string {
 	n := normalize.New(normalize.NormalizationConfig{})
 	seen := make(map[string]bool)
@@ -630,8 +785,8 @@ func Deduplicate(titles []string) []string {
 	return result
 }
 
-// TitleOrFallback returns the title in the requested language, or falls back
-// to the first available language, or the provided fallback string.
+// TitleOrFallback returns the title in the requested language, falling back
+// to the first available language or the provided fallback string.
 func TitleOrFallback(altTitleJSON, lang, fallback string) string {
 	data := parseAltTitles(altTitleJSON)
 

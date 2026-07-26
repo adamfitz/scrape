@@ -35,6 +35,7 @@ func New(requestsPerSecond float64) *RateLimiter {
 	return rl
 }
 
+// refill runs in a goroutine, replenishing tokens at the configured interval.
 func (r *RateLimiter) refill() {
 	for {
 		select {

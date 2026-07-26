@@ -42,12 +42,23 @@ scrape
 ### Default (minimal)
 
 ```
-[db] One Piece | Ongoing | en
-[api] Naruto | Ongoing | ja
-[db] Unknown Manga — not found locally
+[db] One Piece
+[api] Naruto
+[fuzzy] Attack on Titan
+[fuzzy] [fuzzy multiple] Dragon Ball Z
 ```
 
-Format: `[source] Title | Status | Language`
+Format: `[source] Title`
+
+### Batch summary
+
+```
+---
+713 processed — 630 found (DB: 600, Fuzzy: 30, API: 0), 11 fuzzy (multiple), 47 not found
+  → Fuzzy (multiple): run `scrape lookup "<title>"` for each to disambiguate
+  → Not found: not on MangaDex — check manually or skip
+---
+```
 
 ### Verbose (`-v`)
 
@@ -81,8 +92,9 @@ MangaDex:   https://mangadex.org/title/...
 ## Source Indicator
 
 Every output line indicates where the result came from:
-- `[db]` — local database
-- `api` — MangaDex API (JSON field)
+- `[db]` — local database (exact title_index match)
+- `[fuzzy]` — fuzzy match (single match auto-linked, or `[fuzzy multiple]` for ambiguous)
+- `[api]` — MangaDex API (ingested into database)
 
 ## English Title Resolution
 

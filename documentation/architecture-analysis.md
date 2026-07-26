@@ -78,15 +78,21 @@ Normalisation was applied **inside** the database layer and **inside** the comma
 
 ### Pillar 1: Normalisation Component (`internal/normalise/`)
 
-**Responsibility**: Transform text. Nothing else.
+**Responsibility**: Transform text and score string similarity. Nothing else.
 
-- Takes a string, returns a string.
+- Takes a string, returns a string (or a float64 for similarity).
 - No database, no API, no file I/O.
 - Pure functions, stateless (the normaliser is immutable after construction — safe for concurrent use).
 - Individually testable with known inputs/outputs.
 - Can be swapped or upgraded without touching other pillars.
 
-**Current state**: Exists as `internal/normalize/`. NFKC + supplemental fold replaces the manual `unicodeFold` map. Unicode case folding replaces `strings.ToLower`. This pillar is in place.
+**What it owns:**
+- NFKC normalization + supplemental fold (`FoldUnicode`)
+- Full canonical form (`Normalize` / `MustNormalize`)
+- Grammar expansion (`GrammarRules` map — extensible at runtime)
+- Fuzzy scoring (`Similarity`, `Match`, `BestMatch` — pure stdlib Levenshtein + token Jaccard)
+
+**Current state**: Exists as `internal/normalize/`. NFKC + supplemental fold replaces the manual `unicodeFold` map. Unicode case folding replaces `strings.ToLower`. Grammar expansion handles contractions. Fuzzy scoring provides similarity metrics. This pillar is in place.
 
 ### Pillar 2: Data Component (`internal/data/`)
 
@@ -184,22 +190,28 @@ The pipeline exposes operations that work for any media type:
 
 ```go
 // Lookup any media type by title (exact match via normalised comparison)
-Lookup(db *database.DB, mediaType database.MediaType, title string) (*database.Media, error)
+Lookup(mediaType database.MediaType, title string) (*database.Media, error)
+
+// FuzzyLookup — exact match + fuzzy fallback with threshold
+FuzzyLookup(mediaType database.MediaType, query string, threshold float64) *FuzzyLookupResult
 
 // Batch lookup — returns found entries keyed by original title, and missing titles
-BatchLookup(db *database.DB, mediaType database.MediaType, titles []string) (map[string]*database.Media, []string)
+BatchLookup(mediaType database.MediaType, titles []string) (map[string]*database.Media, []string)
+
+// LinkQuery — add secondary title_index entry for idempotent fuzzy matches
+LinkQuery(mediaType database.MediaType, mediaID int64, originalQuery string) error
 
 // Ingest normalises and upserts a media record
-Ingest(db *database.DB, m *database.Media) (int64, error)
+Ingest(m *database.Media) (int64, error)
 
 // Maintenance — normalise all stored titles across all media tables
-NormalizeAllTitles(db *database.DB) (int64, error)
+NormalizeAllTitles() (int64, error)
 
 // Utilities
 QueryForAPI(title string) string           // normalise for external API search
 Deduplicate(titles []string) []string      // dedup using normalised forms
 TitleOrFallback(altTitleJSON, lang, fallback string) string  // extract title by language
-NewNormalizer() *normalize.Normalizer      // for callers needing direct access
+Normalizer() *normalize.Normalizer          // for callers needing direct access
 ```
 
 Each method:
@@ -209,7 +221,7 @@ Each method:
 
 The pipeline is the **only** package that imports both `normalise/` and `data/`. Commands only import `pipeline/`.
 
-**Current state**: Exists as `internal/pipeline/`. Composes normalise + data via `Lookup` (DB-only), `LookupAPI` (full DB → MangaDex flow), `BatchLookup`, `BatchLookupStream` (channel-based), `Ingest`, `IngestCandidate`, `NormalizeAllTitles`, `QueryForAPI`, `Deduplicate`, `TitleOrFallback`, `NewNormalizer`, `ParseAltTitles`. The pipeline owns `mangadex/`, `ratelimit/`, and `normalise/` dependencies. Commands import only `pipeline/` and `database/` — no direct `mangadex.*`, `ratelimit.*`, or `normalize.*` calls from commands.
+**Current state**: Exists as `internal/pipeline/`. Composes normalise + data via `Lookup` (DB-only), `LookupAPI` (full DB → MangaDex flow), `FuzzyLookup` (DB-only with fuzzy fallback and configurable threshold), `BatchLookup`, `BatchLookupStream` (channel-based with fuzzy scan tier), `Ingest`, `IngestCandidate`, `NormalizeAllTitles`, `QueryForAPI`, `Deduplicate`, `TitleOrFallback`, `LinkQuery`, `Normalizer`, `ParseAltTitles`. The pipeline owns `mangadex/`, `ratelimit/`, and `normalise/` dependencies. Commands import only `pipeline/` and `database/` — no direct `mangadex.*`, `ratelimit.*`, or `normalize.*` calls from commands.
 
 ### Pipeline Execution Model
 
@@ -271,24 +283,31 @@ Normalisation happened in 5 different places. No single point of control. This w
 ### After (Current)
 
 ```
-User input ──► pipeline.Lookup(db, MediaTypeManga, "title")
+User input ──► pipeline.Lookup(MediaTypeManga, "title")
                   │
-                  ├── normalize.New() + MustNormalize("title")  ──► normalised query
+                  ├── normalize.MustNormalize("title")
+                  │       ├── NFKC + supplemental fold
+                  │       ├── Grammar expansion (dont → do not, case-insensitive)
+                  │       ├── separators, noise, stop words, case fold
+                  │       └── canonical query
                   │
-                  ├── db.AllMedia(MediaTypeManga)
+                  ├── Tier 1: db.QueryTitleIndex(mediaType, canonicalQuery)  ──► O(1) exact match
                   │       │
-                  │       ├── returns raw []Media
+                  │       ├── HIT → return immediately
                   │       │
-                  │       ├── allTitles(each)           ← extract all language variants
-                  │       ├── normalize.MustNormalize() ← normalise for comparison
-                  │       └── compare + return
+                  │       └── MISS → Tier 2: fuzzyScan()
+                  │               │
+                  │               ├── db.AllMedia() → all records
+                  │               ├── normalize.Similarity(query, each title's normalised form)
+                  │               ├── single match ≥ 0.85 → LinkQuery + return SourceFuzzy
+                  │               ├── multiple matches ≥ 0.85 → return FuzzyCandidates
+                  │               └── no matches → Tier 3: API
                   │
-                  ├── if not found:
-                  │       pipeline.QueryForAPI("title")  ← normalise for API search
+                  ├── Tier 3: pipeline.QueryForAPI("title")  ← normalise for API search
                   │       api.SearchManga(apiQuery)
-                  │       queryMatchesAnyTitle()         ← validate API results
+                  │       queryMatchesAnyTitle()  ← 4 strategies: substring + space + apostrophe + fuzzy
                   │       pipeline.Ingest(media)
-                  │           ├── normalize.FoldUnicode(title)
+                  │           ├── normalize.FoldUnicode(title) + grammar expansion
                   │           ├── normalize.NormalizeAllTitlesJSON(alt)
                   │           └── db.UpsertMedia(normalised)
                   │
@@ -570,11 +589,12 @@ The three-pillar architecture is the right approach for this codebase, for these
 3. ~~**Create pipeline component**~~ — `internal/pipeline/` with `Lookup`, `BatchLookup`, `Ingest`, `NormalizeAllTitles`. **Done.**
 4. ~~**Move normalisation from commands to pipeline**~~ — all commands call pipeline, no direct `normalize.*` calls from commands. **Done.**
 5. ~~**Add normalisation to non-manga tables**~~ — pipeline handles all 5 title-bearing tables uniformly. **Done.**
-6. ~~**Remove fuzzy matching**~~ — removed entirely; normalisation handles systematic variants, API handles typos. **Done.**
+6. ~~**Remove fuzzy matching**~~ — ~~removed entirely; normalisation handles systematic variants, API handles typos.~~ **Re-instated as tiered fuzzy matching** — grammar expansion + token Jaccard + Levenshtein + fuzzy API validation. See `fuzzy-matching/spec.md`.
 7. ~~**Refactor CLI as thin consumer**~~ — CLI imports only `pipeline/` and `database/`. No direct `mangadex/`, `ratelimit/`, or `normalize/` imports from commands. **Done.**
 8. ~~**Pipeline struct + structured errors**~~ — `Pipeline` struct with `Options`, `PipelineError`/`ErrorKind` types, `LookupService` interface for testing. All methods are struct methods on `*Pipeline`. **Done.**
 9. ~~**Pre-computed title index**~~ — `title_index` table with `(media_type, normalised)` index. Pipeline maintains it at ingest/normalize time. `Lookup` and `BatchLookup` use indexed queries instead of full table scans. Auto-rebuilds on startup for existing databases. **Done.**
-10. **Build GUI** — import `pipeline/`, implement HTTP server or desktop UI. No changes to core libraries needed.
+10. ~~**Fuzzy matching + grammar expansion**~~ — `GrammarRules` map for contraction expansion, `Similarity()`/`BestMatch()` for scoring, `FuzzyLookup()` for tiered lookup, `LinkQuery()` for idempotent linking. See `fuzzy-matching/spec.md`. **Done.**
+11. **Build GUI** — import `pipeline/`, implement HTTP server or desktop UI. No changes to core libraries needed.
 
 ---
 
@@ -582,15 +602,15 @@ The three-pillar architecture is the right approach for this codebase, for these
 
 ```
 CLI (commands/) ──┐
-                   ├──► pipeline/ ──► normalise/
+                   ├──► pipeline/ ──► normalise/ (grammar rules + fuzzy scoring)
 GUI (future)   ──┘         │
                            └──────► data/ ──► database drivers
 ```
 
 - **CLI** (`commands/`) depends on `pipeline/`. Never on `normalise/` or `data/` directly.
 - **GUI** (future) depends on `pipeline/`. Same rules as CLI.
-- **`pipeline/`** depends on `normalise/` and `data/`. Never on `commands/` or GUI code.
-- **`normalise/`** depends on `golang.org/x/text` (NFKC, case fold). No other dependencies.
+- **`pipeline/`** depends on `normalise/` and `data/`. Never on `commands/` or GUI code. Uses `normalize.Similarity()` for fuzzy matching and `db.IndexTitles()` for idempotent linking via `LinkQuery()`.
+- **`normalise/`** depends on `golang.org/x/text` (NFKC, case fold). No other dependencies. Owns `GrammarRules` map (36 contraction/misspelling rules, extensible at runtime) and fuzzy scoring functions (`Similarity`, `Match`, `BestMatch`).
 - **`data/`** depends on database drivers. Does NOT depend on `normalise/`.
 
 The key structural constraint: `normalise/` and `data/` have zero dependency on each other. `pipeline/` is the only package that imports both. This enforces the data boundary.

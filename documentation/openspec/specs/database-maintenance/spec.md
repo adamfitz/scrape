@@ -35,8 +35,9 @@ The tool SHALL provide a `scrape maintenance` command with subcommands.
 - GIVEN the command `scrape maintenance normalize`
 - WHEN executed
 - THEN all manga titles and alt_titles SHALL be Unicode-folded (confusable characters → ASCII)
-- AND the count of updated records SHALL be displayed
-- AND running the command again SHALL update 0 records (idempotent)
+- AND the title_index SHALL be rebuilt with full normalisation (including grammar expansion)
+- AND the output SHALL show `Indexed N record(s) (M updated)` where N is total records re-indexed and M is records whose title changed
+- AND running the command again SHALL show `Indexed N record(s) (0 updated)` (idempotent)
 
 ### Requirement: VACUUM safety
 
@@ -79,17 +80,18 @@ Stats SHALL include:
 
 ### Requirement: Title normalization
 
-The `normalize` subcommand SHALL re-normalise all `title` and `alt_title` values in the manga table using Unicode folding. This is a one-time migration for data inserted before Unicode folding was applied. The operation is idempotent.
+The `normalize` subcommand SHALL re-normalise all `title` and `alt_title` values using Unicode folding (`FoldUnicode`). It SHALL also rebuild the `title_index` with full normalisation (including grammar expansion) for all media types. The operation is idempotent.
 
 #### Scenario: First run normalizes legacy data
 
 - GIVEN the database has 200 manga records with raw Unicode characters in titles
 - WHEN `scrape maintenance normalize` is executed
 - THEN all titles SHALL be Unicode-folded
-- AND the output SHALL show `Updated N title(s)` where N > 0
+- AND the title_index SHALL be rebuilt
+- AND the output SHALL show `Indexed N record(s) (M updated)` where M > 0
 
 #### Scenario: Second run is no-op
 
 - GIVEN the database was just normalized
 - WHEN `scrape maintenance normalize` is executed again
-- THEN the output SHALL show `Updated 0 title(s)`
+- THEN the output SHALL show `Indexed N record(s) (0 updated)`

@@ -39,17 +39,21 @@ func New(config NormalizationConfig) *Normalizer {
 	return n
 }
 
+// normalizeConfig applies default rules when slices are nil/empty.
 func normalizeConfig(c NormalizationConfig) NormalizationConfig {
 	if len(c.Separators) == 0 {
-		c.Separators = []string{".", "_", "-", ":", ";", ",", "!", "?", "'", "'", "\"", "~", "～", "〜"}
+		c.Separators = []string{".", "_", "-", ":", ";", ",", "!", "?", "'", "'", "\"", "~", "～", "〜", "&", "|", "•"}
 	}
 	if len(c.NoisePatterns) == 0 {
 		c.NoisePatterns = []string{
 			`\[.*?\]`,
 			`\(.*?\)`,
-			`\s(v|vol)\.?\s*\d+`,
-			`\s(ch|ch\.|chapter)\s*\d+`,
-			`\s(part|pt)\.?\s*\d+`,
+			`\s(v|vol)\.?\s*(\d+|[ivxlcdm]+)`,
+			`\s(ch|ch\.|chapter)\s*(\d+|[ivxlcdm]+)`,
+			`\sPerfect Edition`,
+			`\sOmnibus Edition`,
+			`\s2-in-1 Edition`,
+			`\s\d{4}$`,
 		}
 	}
 	if len(c.StopWords) == 0 {
@@ -58,6 +62,7 @@ func normalizeConfig(c NormalizationConfig) NormalizationConfig {
 	return c
 }
 
+// compile builds internal regexes and stop-word set from the config.
 func (n *Normalizer) compile() {
 	// Build character class. Put - at end so it's literal, not a range.
 	var class []string
@@ -84,6 +89,45 @@ func (n *Normalizer) compile() {
 func (n *Normalizer) Configure(config NormalizationConfig) {
 	n.config = normalizeConfig(config)
 	n.compile()
+}
+
+// GrammarRules maps contracted/misspelled forms to their expanded canonical forms.
+// All keys and values are lowercase. Applied after FoldUnicode, before separator folding.
+// Extensible: add new rules by appending to this map at runtime.
+var GrammarRules = map[string]string{
+	"dont":     "do not",
+	"doesnt":   "does not",
+	"didnt":    "did not",
+	"cant":     "can not",
+	"wont":     "will not",
+	"isnt":     "is not",
+	"wasnt":    "was not",
+	"arent":    "are not",
+	"werent":   "were not",
+	"hasnt":    "has not",
+	"havent":   "have not",
+	"hadnt":    "had not",
+	"wouldnt":  "would not",
+	"couldnt":  "could not",
+	"shouldnt": "should not",
+	"mustnt":   "must not",
+	"ive":      "i have",
+	"youve":    "you have",
+	"weve":     "we have",
+	"theyve":   "they have",
+	"im":       "i am",
+	"youre":    "you are",
+	"were":     "we are",
+	"theyre":   "they are",
+	"hes":      "he is",
+	"shes":     "she is",
+	"thats":    "that is",
+	"whats":    "what is",
+	"whos":     "who is",
+	"wheres":   "where is",
+	"hows":     "how is",
+	"its":      "it is",
+	"lets":     "let us",
 }
 
 var extRe = regexp.MustCompile(`(?i)\.(cbz|cbr|cb7|zip|rar|7z|tar\.gz|mkv|mp4|avi|m4v|mov|wmv|flv|pdf|epub|mobi|azw3|djvu|jpg|jpeg|png|gif|webp|bmp|tiff?)$`)
@@ -163,6 +207,9 @@ func (n *Normalizer) Normalize(name string) (string, error) {
 	// NFKC normalize + supplemental fold for characters NFKC misses
 	s = FoldUnicode(s)
 
+	// Grammar expansion: expand contractions and common misspellings
+	s = expandGrammar(s)
+
 	s = extRe.ReplaceAllString(s, "")
 	s = n.sepRe.ReplaceAllString(s, " ")
 	s = n.noiseRe.ReplaceAllString(s, "")
@@ -182,6 +229,30 @@ func (n *Normalizer) Normalize(name string) (string, error) {
 	}
 
 	return n.caseFold.String(strings.Join(filtered, " ")), nil
+}
+
+// expandGrammar applies the GrammarRules map to expand contractions and
+// common misspellings. Runs word-by-word to avoid partial matches within
+// longer words. Case-insensitive and handles apostrophe variants.
+func expandGrammar(s string) string {
+	words := strings.Fields(s)
+	changed := false
+	for i, w := range words {
+		lowered := strings.ToLower(w)
+		// Strip apostrophes to match canonical GrammarRules keys
+		cleaned := strings.ReplaceAll(lowered, "'", "")
+		cleaned = strings.ReplaceAll(cleaned, "\u2018", "")
+		cleaned = strings.ReplaceAll(cleaned, "\u2019", "")
+		cleaned = strings.ReplaceAll(cleaned, "\u02BC", "")
+		if expanded, ok := GrammarRules[cleaned]; ok {
+			words[i] = expanded
+			changed = true
+		}
+	}
+	if !changed {
+		return s
+	}
+	return strings.Join(words, " ")
 }
 
 // MustNormalize panics if Normalize returns an error.

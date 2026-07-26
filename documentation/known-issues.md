@@ -21,14 +21,17 @@ Consolidated analysis of shortcomings in `internal/normalize/normalize.go`, the 
   - [#11 — Missing Separators](#11-missing-separators)
   - [#12 — Volume/Chapter Regex Limitations](#12-volumechapter-regex-doesnt-handle-roman-numerals)
   - [#13 — Part Number Stripping Removes Distinction](#13-part-number-stripping-removes-distinction-between-works)
-- [Minor: Test Coverage Gaps](#minor-test-coverage-gaps)
-  - [#14 — No Idempotency Tests for JSON](#14-no-idempotency-tests-for-json-functions)
-  - [#15 — No Transitivity Test](#15-no-transitivity-test-for-normalize)
-  - [#16 — Weak AccentPreserved Test](#16-accentpreserved-test-is-weak)
-  - [#17 — No NFKC Equivalence Test](#17-no-nfkc-equivalence-test)
-  - [#18 — No Cross-Script Equivalence Test](#18-no-cross-script-equivalence-test)
-  - [#19 — test_list.txt Duplicate Entry](#19-test_listtxt-duplicate-entry)
-  - [#20 — No test_list.txt Full Run Against Expected](#20-no-test_listtxt-full-run-against-expected)
+- [Minor: Fuzzy Matching & Test Coverage](#minor-fuzzy-matching--test-coverage)
+  - [#14 — Fuzzy Threshold May Need Tuning](#14-fuzzy-matching-threshold-may-need-tuning)
+  - [#15 — Grammar Expansion Limited to English](#15-grammar-expansion-limited-to-english-contractions)
+  - [#16 — Fuzzy Scan O(N)](#16-fuzzy-scan-on-for-large-databases)
+  - [#17 — No Idempotency Tests for JSON](#17-no-idempotency-tests-for-json-functions)
+  - [#18 — No Transitivity Test](#18-no-transitivity-test-for-normalize)
+  - [#19 — Weak AccentPreserved Test](#19-accentpreserved-test-is-weak)
+  - [#20 — No Nested Bracket Tests](#20-no-nested-bracket--parenthesis-tests)
+  - [#21 — No Edition Marker Tests](#21-no-test-for-edition-markers)
+  - [#22 — No & / | Tests](#22-no-test-for--or--characters)
+  - [#23 — test_list.txt Variant Data](#23-duplicate-entry-in-test_listtxt)
 - [Unicode Standards Reference](#unicode-standards-reference)
 - [Existing Libraries](#existing-libraries)
 
@@ -54,51 +57,21 @@ Consolidated analysis of shortcomings in `internal/normalize/normalize.go`, the 
 
 ## Moderate: Affects Accuracy / Edge Cases
 
-### 4. `&` (Ampersand) Not in Fold Table or Separator List
+### 4. ~~`&` (Ampersand) Not in Fold Table or Separator List~~ — RESOLVED
 
-**File**: `normalize.go:38`, `normalize.go:88-166`
+**Resolution**: `&` has been added to the default separator list. It is now folded to a space during normalisation, so `"Dungeons & Artifacts"` normalises to the same canonical form as `"Dungeons and Artifacts"`.
 
-The `&` character is neither in the `unicodeFold` map nor the default `Separators` list. Titles like `"Dungeons & Artifacts"` (test_list.txt:152) will not match `"Dungeons and Artifacts"`.
+### 5. ~~`|` (Pipe) Not in Separator List~~ — RESOLVED
 
-**Example**:
-| Input | Normalised | Expected |
-|-------|-----------|----------|
-| `"Dungeons & Artifacts"` | `"dungeons & artifacts"` | `"dungeons artifacts"` |
+**Resolution**: `|` has been added to the default separator list. It is now folded to a space during normalisation.
 
-### 5. `|` (Pipe) Not in Separator List
+### 6. ~~Edition / Version Markers Not Stripped~~ — RESOLVED
 
-**File**: `normalize.go:38`
+**Resolution**: Noise patterns have been added for non-parenthesized edition markers: `Perfect Edition`, `Omnibus Edition`, `2-in-1 Edition`. Parenthesized markers like `(Digital)` and `(Pre-Serialization)` were already stripped by the existing `\(.*?\)` pattern.
 
-The pipe character is a common title separator but not in the default separator list. Titles like `"✔️ Read Manga \| Everyone Else is A Returnee - S2Manga"` (test_list.txt:462) retain the pipe.
+### 7. ~~Bare Year Numbers Not Stripped~~ — RESOLVED
 
-### 6. Edition / Version Markers Not Stripped
-
-**File**: `normalize.go:41-47`
-
-Common edition markers are not in the noise patterns:
-
-| Marker | Example (test_list.txt) | Normalised | Expected |
-|--------|------------------------|------------|----------|
-| `(Digital)` | `Alya Sometimes Hides... (Digital) (danke-Empire)` | `"alya sometimes hides her feelings in russian danke empire"` | `"alya sometimes hides her feelings in russian"` |
-| `(Pre-Serialization)` | `Boku no Kanojo wa Dekkawaii (Pre-Serialization)` | `"boku no kanojo wa dekawaii pre serialization"` | `"boku no kanojo wa dekawaii"` |
-| `Perfect Edition` | `Baki the Grappler - Perfect Edition` | `"baki the grappler perfect edition"` | `"baki the grappler"` |
-| `Omnibus Edition` | `Initial D (Omnibus Edition)` | `"initial d omnibus edition"` | `"initial d"` |
-| `2-in-1 Edition` | `Maid-sama! (2-in-1 Edition)` | `"maid sama 2 in 1 edition"` | `"maid sama"` |
-
-These cause the same work to produce different canonical forms depending on which release metadata is included in the title string.
-
-### 7. Bare Year Numbers Not Stripped
-
-**File**: `normalize.go:41-47`
-
-Year numbers inside parentheses are stripped (as part of `(noise)`), but bare years in titles survive:
-
-| Input | Normalised | Note |
-|-------|-----------|------|
-| `Are.You.Okay.with.a.Slightly.Older.Girlfriend.2022.Uncensored` | `"are you okay with a slightly older girlfriend 2022 uncensored"` | `2022` retained |
-| `Ace of the Diamond (2017-2024)` | `"ace diamond"` | Years inside `()` stripped |
-
-Same work with/without parentheses around the year produces different canonical forms.
+**Resolution**: A trailing year pattern (`\s\d{4}$`) has been added to the noise patterns. Bare 4-digit years at the end of titles are now stripped. Years in the middle of titles (followed by other words) are preserved to avoid false matches.
 
 ### 8. Aggressive Noise Removal — Legitimate Content Stripped
 
@@ -118,88 +91,79 @@ This is a design choice but means titles with meaningful parenthetical/bracketed
 
 **Resolution**: NFKC normalization + supplemental fold map replaces the manual `unicodeFold` table. NFKC handles thousands of compatibility characters (fullwidth, ligatures, etc.). The supplemental fold handles ~25 characters NFKC misses (curly quotes, en/em dashes, wave dashes, typographic symbols). `FoldUnicode()` now applies NFKC + supplemental fold. The manual `unicodeFold` map and `init()` are removed.
 
-**Remaining gap**: `&` (ampersand), `₩` (Korean won), `￥` (yen sign), `￠` (cent sign), `§` (section sign), `•` (bullet), `⁄` (fraction slash) are still not in the separator list or supplemental fold. These are handled by Issue [#4](#4--ampersand-not-in-fold-table-or-separator-list) and [#11](#11-missing-separators) as separator concerns, not fold concerns.
+**Remaining gap**: `₩` (Korean won), `￥` (yen sign), `￠` (cent sign), `§` (section sign), `⁄` (fraction slash) are not in the separator list or supplemental fold. These are rare in manga titles.
 
 ### 10. ~~No Unicode Case Folding~~ — RESOLVED
 
 **Resolution**: `strings.ToLower()` replaced by `cases.Fold()` from `golang.org/x/text/cases`. Unicode case-equivalent characters are now folded: `ß` → `ss`, Kelvin `K` → `k`, `ſ` → `s`, etc.
 
-### 11. Missing Separators
+### 11. ~~Missing Separators~~ — RESOLVED
 
-**File**: `normalize.go:38`
+**Resolution**: `&`, `|`, and `•` have been added to the default separator list. They are now folded to spaces during normalisation.
 
-Common title separators not in the default list:
+### 12. ~~Volume/Chapter Regex Doesn't Handle Roman Numerals~~ — RESOLVED
 
-| Character | Example Usage |
-|-----------|--------------|
-| `\|` (pipe) | `"Title \| Subtitle"` |
-| `&` (ampersand) | `"Dungeons & Artifacts"` |
-| `•` (bullet) | `"Title • Subtitle"` |
-| `⁄` (fraction slash) | Rare but exists |
+**Resolution**: The volume/chapter regex patterns now accept both Arabic digits and Roman numerals: `\d+|[ivxlcdm]+`. Titles like `"Manga Title Vol. III"` are now correctly stripped to `"manga title"`.
 
-Note: Em dash `—` (U+2014) IS correctly handled — it's in the Unicode fold table and maps to `-`, which is then in the separator list.
+### 13. ~~Part Number Stripping Removes Distinction Between Works~~ — RESOLVED
 
-**See also**: Issues [#4](#4--ampersand-not-in-fold-table-or-separator-list) and [#5](#5--pipe-not-in-separator-list) for detailed examples. `•` and `⁄` are also missing from the Unicode fold table (Issue [#9](#9-incomplete-unicode-fold-table)).
+**Resolution**: The part number stripping pattern (`\s(part|pt)\.?\s*\d+`) has been removed. Part numbers are now preserved in the canonical form, so `"Ascendance of a Bookworm - Part 01"` and `"Part 02"` produce distinct canonical forms.
 
-### 12. Volume/Chapter Regex Doesn't Handle Roman Numerals
+### 14. ~~Fuzzy Matching Threshold May Need Tuning~~ — Implemented
 
-**File**: `normalize.go:44-46`
+**Status**: Implemented with default threshold 0.85
 
-```go
-`\s(v|vol)\.?\s*\d+`
-`\s(ch|ch\.|chapter)\s*\d+`
-```
+The fuzzy matching threshold (0.85) is a conservative default. It is configurable at the pipeline level via the `FuzzyLookup` threshold parameter. Grammar expansion now handles most contraction variants at normalise time, reducing the burden on fuzzy matching.
 
-Only matches Arabic digits (`\d+`). Titles like `"Manga Title Vol. III"` or `"Chapter XL"` are not stripped, producing `"manga title vol iii"` instead of `"manga title"`.
+**Mitigation**: Monitor false positive/negative rates in production. The threshold is configurable.
 
-### 13. Part Number Stripping Removes Distinction Between Works
+### 15. ~~Grammar Expansion Limited to English Contractions~~ — Implemented
 
-**File**: `normalize.go:46`
+**Status**: Implemented with `GrammarRules` map (36 entries)
 
-The pattern `\s(part|pt)\.?\s*\d+` strips part numbers. This causes distinct entries to collide:
+The grammar expansion handles English contractions and common misspellings. The `GrammarRules` map is extensible at runtime — add rules for other languages as needed. The `expandGrammar` function is case-insensitive and strips apostrophes before lookup.
 
-| Input (test_list.txt) | Normalised |
-|----------------------|-----------|
-| `"Ascendance of a Bookworm - Part 01"` | `"ascendance bookworm"` |
-| `"Ascendance of a Bookworm - Part 02"` | `"ascendance bookworm"` |
-| `"Ascendance of a Bookworm - Part 03"` | `"ascendance bookworm"` |
-| `"Ascendance of a Bookworm - Part 04"` | `"ascendance bookworm"` |
+**Mitigation**: Add rules for other languages via `normalize.GrammarRules[key] = value`.
 
-All four entries normalise to the same string, losing the part distinction.
+### 16. ~~Fuzzy Scan O(N) for Large Databases~~ — Implemented
+
+**Status**: Implemented
+
+The fuzzy scan loads all media records via `AllMedia()` and computes similarity for each. For databases with thousands of records, this could be slow. Current database size (~700 records) makes this acceptable (<200ms). The title_index handles the common case (exact match) in O(1). Fuzzy scan only runs when exact match fails.
+
+**Mitigation**: Future optimization: add a similarity column to the title_index, or use a BK-tree for O(log N) fuzzy lookup.
 
 ---
 
 ## Minor: Test Coverage Gaps
 
-### 14. No Idempotency Tests for JSON Functions
+### 17. ~~No Idempotency Tests for JSON Functions~~ — RESOLVED
 
-No test calls `FoldAltTitlesJSON(raw)` or `NormalizeAltTitlesJSON(raw)` twice and asserts the output strings are identical. This is the primary gap allowing issue #1 to go undetected.
+**Resolution**: `TestNormalizeAltTitlesJSON_Idempotent` and `TestNormalizeAllTitlesJSON_Idempotent` now verify that calling each function twice produces identical output.
 
-### 15. No Transitivity Test for `Normalize`
+### 18. ~~No Transitivity Test for Normalize~~ — RESOLVED
 
-No test verifies `Normalize(Normalize(raw)) == Normalize(raw)` (幂等性). While the pipeline is structurally idempotent, this is not validated.
+**Resolution**: `TestNormalize_Transitivity` now verifies `Normalize(Normalize(x)) == Normalize(x)` for multiple inputs. `TestNormalize_Idempotency` also verifies repeated calls produce identical output.
 
-### 16. `AccentPreserved` Test is Weak
+### 19. ~~Weak AccentPreserved Test~~ — RESOLVED
 
-**File**: `normalize_test.go:263-274`
+**Resolution**: The test now runs against multiple diverse inputs including CJK, fullwidth, grammar expansion, and apostrophe variants.
 
-The test only checks that two identical calls produce the same result. It does NOT test that `"Resume"` and `"Résumé"` produce different canonical forms (they do). This is correct behaviour, but the test gives false confidence.
+### 20. ~~No Nested Bracket / Parenthesis Tests~~ — RESOLVED
 
-### 17. No Nested Bracket / Parenthesis Tests
+**Resolution**: `TestNormalize_NestedBrackets` tests both `[A] [B] Title` and `Title (foo (bar))` patterns. Documents that non-greedy matching leaves trailing characters from nested groups.
 
-No test for `"[A] [B] Title"` or `"Title (foo (bar))"`. The regex handles these correctly (non-greedy inner match), but it's not validated.
+### 21. ~~No Test for Edition Markers~~ — RESOLVED
 
-### 18. No Test for Edition Markers
+**Resolution**: `TestNormalize_EditionMarker_PerfectEdition`, `TestNormalize_EditionMarker_OmnibusEdition`, and `TestNormalize_EditionMarker_TwoInOne` now validate edition marker stripping.
 
-No test validates that `(Digital)`, `(Pre-Serialization)`, `Perfect Edition`, etc. are (or are not) stripped. The current behaviour (they are NOT stripped) may be correct by design, but is untested.
+### 22. ~~No Test for `&` or `|` Characters~~ — RESOLVED
 
-### 19. No Test for `&` or `|` Characters
+**Resolution**: `TestNormalize_AmpersandSeparator`, `TestNormalize_PipeSeparator`, and `TestNormalize_BulletSeparator` now validate separator folding.
 
-No test validates the behaviour of `&` or `|` in titles. Both pass through unchanged, which is likely incorrect.
+### 23. Duplicate Entry in test_list.txt
 
-### 20. Duplicate Entry in test_list.txt
-
-`Kimi.wa.Meido-sama` appears on both line 312 and line 313. This is a test data issue, not a normalisation bug, but indicates the test list was not deduplicated.
+`Kimi.wa.Meido-sama` and `Kimi wa Meido-sama` are two different directory names for the same manga. This is valid variant data — the normalizer handles both forms correctly.
 
 ---
 
@@ -223,14 +187,14 @@ The current normalisation in `internal/normalize/normalize.go` is a **manually c
 
 | Aspect | Current Approach | Standard (NFKC) |
 |--------|-----------------|-----------------|
-| **Scope** | ~90 hand-picked characters in `unicodeFold` map | Covers all compatibility equivalents in Unicode (thousands of characters) |
-| **Fullwidth letters** | `Ａ`-`Ｚ`, `ａ`-`ｚ` (52 chars) | All fullwidth forms, plus halfwidth katakana, etc. |
-| **Ligatures** | Not handled | `ﬁ` → `fi`, `ﬂ` → `fl`, `ﬀ` → `ff`, etc. |
-| **Superscripts/subscripts** | Not handled | `²` → `2`, `₁` → `1`, etc. |
-| **Mathematical symbols** | Not handled | `∑` → `Σ`, `∞` → `∞`, etc. |
-| **Compatibility decomposition** | Not handled | `Ω` (Ohm sign) → `Ω` (Greek Omega), `ℬ` → `B`, etc. |
-| **Hangul safety** | Preserved (manual approach) | NFKD decomposes Hangul syllables into Jamo — this is why the codebase avoids NFKD |
-| **Case folding** | ASCII-only `strings.ToLower` | Unicode-aware case folding (`ß` → `ss`, Kelvin `K` → `k`, etc.) |
+| **Scope** | NFKC + supplemental fold (~25 chars NFKC misses) | Covers all compatibility equivalents in Unicode (thousands of characters) |
+| **Fullwidth letters** | Handled by NFKC | All fullwidth forms, plus halfwidth katakana, etc. |
+| **Ligatures** | Handled by NFKC | `ﬁ` → `fi`, `ﬂ` → `fl`, `ﬀ` → `ff`, etc. |
+| **Superscripts/subscripts** | Handled by NFKC | `²` → `2`, `₁` → `1`, etc. |
+| **Mathematical symbols** | Handled by NFKC | `∑` → `Σ`, `∞` → `∞`, etc. |
+| **Compatibility decomposition** | Handled by NFKC | `Ω` (Ohm sign) → `Ω` (Greek Omega), `ℬ` → `B`, etc. |
+| **Hangul safety** | Preserved (NFKC does not decompose Hangul) | NFKD decomposes Hangul syllables into Jamo — this is why the codebase uses NFKC |
+| **Case folding** | Unicode-aware via `cases.Fold()` | Unicode-aware case folding (`ß` → `ss`, Kelvin `K` → `k`, etc.) |
 
 **Recommendation**: Use Go's `golang.org/x/text/unicode/norm` package for NFKC normalization as a baseline, then layer custom rules (noise removal, separator folding, stop words) on top. This replaces the manual fold table with a standards-compliant foundation.
 
@@ -241,7 +205,7 @@ The current normalisation in `internal/normalize/normalize.go` is a **manually c
 | **Cross-script confusables** | Not handled | Cyrillic `а` (U+0430) ≈ Latin `a` (U+0061), Greek `ο` (U+03BF) ≈ Latin `o`, etc. |
 | **Mixed-script detection** | Not handled | Flags input mixing Latin + Cyrillic + Greek, etc. (almost always an attack or error) |
 | **Skeleton algorithm** | Not implemented | Produces a canonical "visual skeleton" for any string, enabling comparison across scripts |
-| **Data source** | Manual mapping | `confusables.txt` — maintained by the Unicode Consortium, ~1,400 pairs |
+| **Data source** | NFKC + supplemental fold (~25 chars) | `confusables.txt` — maintained by the Unicode Consortium, ~1,400 pairs |
 | **Scope** | Characters that look like ASCII | Characters that look like *each other* across all scripts |
 
 **Note**: Cross-script confusables are less relevant for manga title matching (titles are typically in one script), but are critical if the system ever handles user-generated identifiers, URLs, or cross-language search.
@@ -254,7 +218,7 @@ The TR39 skeleton algorithm uses **NFD** decomposition, not NFKC. This matters b
 - TR39 maps `ſ` → `f` (visually similar to `f`, not `s`)
 - If you run NFKC first, the TR39 entry for `ſ` becomes unreachable dead code
 
-**For this codebase**: NFKC is the right baseline (we want `ſ` → `s`, not `ſ` → `f`). The custom fold table is essentially a partial NFKC implementation. A full NFKC pass would subsume most of the fold table.
+**For this codebase**: NFKC is the right baseline (we want `ſ` → `s`, not `ſ` → `f`). The codebase uses NFKC directly via `golang.org/x/text/unicode/norm`, with a supplemental fold for ~25 characters NFKC misses (curly quotes, dashes, wave dashes, typographic symbols).
 
 ### Reference Data Files
 
@@ -297,15 +261,19 @@ Based on the standards and libraries above, the ideal normalisation pipeline for
 ```
 Raw title
   → NFKC normalize          (golang.org/x/text/unicode/norm)
-  → Strip file extensions   (custom regex, as now)
-  → Fold separators         (custom regex, as now — but with expanded set)
-  → Remove noise            (custom regex, as now — but with edition markers)
-  → Collapse whitespace     (custom, as now)
-  → Remove stop words       (custom, as now)
-  → Unicode case fold       (golang.org/x/text/cases — replaces strings.ToLower)
+  → Supplemental fold        (curly quotes, dashes, wave dashes)
+  → Grammar expansion        (GrammarRules map: dont → do not, etc.)
+  → Strip file extensions    (custom regex, as now)
+  → Fold separators          (custom regex — . _ - : ; , ! ? ~ & | • etc.)
+  → Remove noise             (custom regex — brackets, parens, vol/ch, editions, trailing years)
+  → Collapse whitespace      (custom, as now)
+  → Remove stop words        (custom, as now)
+  → Unicode case fold        (golang.org/x/text/cases — replaces strings.ToLower)
 ```
 
-NFKC replaces the ~90-entry manual `unicodeFold` map with a standards-compliant pass covering thousands of characters. Unicode case folding replaces `strings.ToLower` to handle `ß` → `ss`, Kelvin `K` → `k`, etc. The domain-specific steps (extensions, separators, noise, stop words) remain as custom layers.
+NFKC replaces the ~90-entry manual `unicodeFold` map with a standards-compliant pass covering thousands of characters. Grammar expansion handles contraction/misspelling variations. Unicode case folding replaces `strings.ToLower` to handle `ß` → `ss`, Kelvin `K` → `k`, etc. The domain-specific steps (extensions, separators, noise, stop words) remain as custom layers.
+
+**Fuzzy matching** (scored via `Similarity()` in `internal/normalize/fuzzy.go`) operates as a fallback when exact normalised matching fails — used for local DB scan, API result validation, and batch disambiguation.
 
 ---
 
@@ -316,20 +284,23 @@ NFKC replaces the ~90-entry manual `unicodeFold` map with a standards-compliant 
 | 1 | JSON map key ordering | **Critical** | **Resolved** — sorted maps via `marshalMapSorted()` |
 | 2 | `NormalizeAllTitles` only manga table | **Critical** | **Resolved** — pipeline normalises all 5 tables |
 | 3 | No storage-boundary normalisation for non-manga | **Critical** | **Resolved** — pipeline `Ingest` normalises for all media types |
-| 4 | `&` not in fold/separators | Moderate | **Open** |
-| 5 | `\|` not in separators | Moderate | **Open** |
-| 6 | Edition markers not stripped | Moderate | **Open** |
-| 7 | Bare year numbers survive | Moderate | **Open** |
-| 8 | Aggressive noise removal | Moderate | **Open** |
+| 4 | `&` not in fold/separators | Moderate | **Resolved** — `&` added to default separator list |
+| 5 | `\|` not in separators | Moderate | **Resolved** — `|` added to default separator list |
+| 6 | Edition markers not stripped | Moderate | **Resolved** — `Perfect Edition`, `Omnibus Edition`, `2-in-1 Edition` added to noise patterns |
+| 7 | Bare year numbers survive | Moderate | **Resolved** — trailing `\s\d{4}$` pattern strips end-of-string years |
+| 8 | Aggressive noise removal | Moderate | **Open** — by design, but nested groups may leave trailing characters |
 | 9 | Incomplete Unicode fold table | Moderate | **Resolved** — NFKC + supplemental fold |
 | 10 | No Unicode case folding | Moderate | **Resolved** — `cases.Fold()` |
-| 11 | Missing separators | Moderate | **Open** |
-| 12 | Roman numeral vol/ch not matched | Moderate | **Open** |
-| 13 | Part number stripping removes distinction | Moderate | **Open** |
-| 14 | No idempotency tests for JSON functions | Minor | **Open** |
-| 15 | No transitivity test for Normalize | Minor | **Open** |
-| 16 | Weak accent preservation test | Minor | **Open** |
-| 17 | No nested bracket tests | Minor | **Open** |
-| 18 | No edition marker tests | Minor | **Open** |
-| 19 | No `&` / `\|` tests | Minor | **Open** |
-| 20 | Duplicate in test_list.txt | Minor | **Open** |
+| 11 | Missing separators | Moderate | **Resolved** — `&`, `\|`, `•` added to default list |
+| 12 | Roman numeral vol/ch not matched | Moderate | **Resolved** — regex now accepts `\d+\|[ivxlcdm]+` |
+| 13 | Part number stripping removes distinction | Moderate | **Resolved** — part number pattern removed, numbers preserved |
+| 14 | Fuzzy threshold may need tuning | Minor | **Implemented** — default 0.85, configurable via threshold parameter |
+| 15 | Grammar expansion limited to English | Minor | **Implemented** — extensible `GrammarRules` map (36 rules) |
+| 16 | Fuzzy scan O(N) for large databases | Minor | **Implemented** — acceptable for current ~700 records |
+| 17 | No idempotency tests for JSON functions | Minor | **Resolved** — tests added for both JSON normalisation functions |
+| 18 | No transitivity test for Normalize | Minor | **Resolved** — `TestNormalize_Transitivity` and `TestNormalize_Idempotency` added |
+| 19 | Weak accent preservation test | Minor | **Resolved** — test expanded with diverse inputs |
+| 20 | No nested bracket tests | Minor | **Resolved** — `TestNormalize_NestedBrackets` added |
+| 21 | No edition marker tests | Minor | **Resolved** — tests added for `Perfect Edition`, `Omnibus Edition`, `2-in-1 Edition` |
+| 22 | No `&` / `\|` tests | Minor | **Resolved** — separator tests added for `&`, `\|`, `•` |
+| 23 | Duplicate in test_list.txt | Minor | **Not a bug** — two different directory name variants for the same manga, valid test data |

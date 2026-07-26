@@ -58,12 +58,13 @@ Non-Latin scripts (Hangul, Kanji, Kana, CJK) SHALL NOT be modified — they are 
 The pipeline SHALL apply the following transformations in order to produce the canonical form used for matching:
 
 1. **NFKC normalize + supplemental fold** — Unicode NFKC via `golang.org/x/text/unicode/norm`, then a supplemental fold map for ~25 characters NFKC misses (curly quotes, en/em dashes, wave dashes, typographic symbols). This replaces the previous manual `unicodeFold` map.
-2. **File extension strip** — remove media file extensions (custom regex)
-3. **Separator fold** — convert punctuation to spaces (custom regex, expanded character set)
-4. **Noise removal** — remove bracketed tags, parenthesized notes, volume/chapter/part markers, edition markers (custom regex)
-5. **Multi-space collapse** — collapse consecutive spaces
-6. **Stop word removal** — remove configurable stop words
-7. **Unicode case fold** — case-insensitive folding (`golang.org/x/text/cases`). Replaces `strings.ToLower` to handle `ß → ss`, Kelvin `K → k`, and other locale-aware case mappings.
+2. **Grammar expansion** — expand common English contractions and misspellings using an extensible `GrammarRules` map (e.g., `dont` → `do not`, `youre` → `you are`). Applied after fold, before separator folding. Ensures contracted and expanded forms normalise identically.
+3. **File extension strip** — remove media file extensions (custom regex)
+4. **Separator fold** — convert punctuation to spaces (custom regex, expanded character set)
+5. **Noise removal** — remove bracketed tags, parenthesized notes, volume/chapter/part markers, edition markers (custom regex)
+6. **Multi-space collapse** — collapse consecutive spaces
+7. **Stop word removal** — remove configurable stop words
+8. **Unicode case fold** — case-insensitive folding (`golang.org/x/text/cases`). Replaces `strings.ToLower` to handle `ß → ss`, Kelvin `K → k`, and other locale-aware case mappings.
 
 #### Scenario: NFKC fullwidth fold
 
@@ -103,6 +104,9 @@ The normalizer SHALL convert common word separators and punctuation into spaces:
 | `~` | Tilde |
 | `～` | Fullwidth tilde |
 | `〜` | Wave dash |
+| `&` | Ampersand |
+| `\|` | Pipe |
+| `•` | Bullet |
 
 #### Scenario: Colon-separated title
 
@@ -128,13 +132,37 @@ The normalizer SHALL remove common media file extensions (`.cbz`, `.cbr`, `.mkv`
 
 ### Requirement: Noise removal
 
-The normalizer SHALL remove bracketed tags `[...]`, parenthesized notes `(...)`, and volume/chapter/part markers.
+The normalizer SHALL remove bracketed tags `[...]`, parenthesized notes `(...)`, volume/chapter markers (including Roman numerals), edition markers (`Perfect Edition`, `Omnibus Edition`, `2-in-1 Edition`), and trailing year numbers.
 
 #### Scenario: Scan group tag removal
 
 - GIVEN the input `"[ScanGroup] Bloom Into You (Digital)"`
 - WHEN normalized
 - THEN the result SHALL be `"bloom into you"`
+
+#### Scenario: Edition marker removal
+
+- GIVEN the input `"Baki the Grappler - Perfect Edition"`
+- WHEN normalized
+- THEN the result SHALL be `"baki the grappler"` (edition marker stripped)
+
+#### Scenario: Roman numeral volume
+
+- GIVEN the input `"Manga Title Vol. III"`
+- WHEN normalized
+- THEN the result SHALL be `"manga title"` (Roman numeral matched)
+
+#### Scenario: Trailing year removal
+
+- GIVEN the input `"Some Manga 2022"`
+- WHEN normalized
+- THEN the result SHALL be `"some manga"` (trailing year stripped)
+
+#### Scenario: Part number preservation
+
+- GIVEN the input `"Ascendance of a Bookworm - Part 01"`
+- WHEN normalized
+- THEN the result SHALL be `"ascendance of a bookworm part 01"` (part number preserved)
 
 ### Requirement: Stop word removal
 
@@ -188,6 +216,37 @@ The normalizer SHALL preserve non-Latin characters (Japanese kanji/kana, Korean 
 - WHEN normalized
 - THEN the result SHALL be `"외모지상주의"`
 
+### Requirement: Grammar expansion
+
+The normaliser SHALL expand common English contractions and misspellings during the normalisation pass, between NFKC/supplemental fold and separator folding. The expansion rules SHALL be stored in an extensible, package-level `GrammarRules` map.
+
+The `expandGrammar` function SHALL be **case-insensitive** and SHALL **strip apostrophes** (ASCII `'`, curly `\u2018`/`\u2019`, modifier letter `\u02BC`) before looking up words. This ensures "Dont", "Don't", and "don\u2019t" all match the same rule.
+
+#### Scenario: Contraction expansion
+
+- GIVEN the input `"You Like Me, Dont You"`
+- WHEN normalized
+- THEN the result SHALL be `"you like me do not you"` (dont expanded to do not)
+
+#### Scenario: Apostrophe contraction
+
+- GIVEN the input `"You're Under My Skin"`
+- WHEN normalized
+- THEN the result SHALL be `"you are under my skin"` (expandGrammar strips apostrophe, matches "youre" → "you are")
+
+#### Scenario: Apostrophe variant unification
+
+- GIVEN the input `"You Like Me, Don't You"` (ASCII apostrophe)
+- WHEN normalized
+- THEN `expandGrammar` SHALL strip the apostrophe, lowercase, and match `"dont"` → `"do not"`
+- AND the result SHALL be `"you like me do not you"`
+
+#### Scenario: Extensibility
+
+- GIVEN a caller adds `normalize.GrammarRules["gonna"] = "going to"`
+- WHEN a query contains `"gonna"`
+- THEN the normaliser SHALL expand it to `"going to"`
+
 ### Requirement: Determinism
 
 The normalizer SHALL produce identical output for identical input across multiple calls.
@@ -209,25 +268,30 @@ Both functions SHALL handle structured format (`{"primary":{...},"alts":[{...}]}
 
 ```go
 type NormalizationConfig struct {
-    Separators    []string  // default: [".", "_", "-", ":", ";", ",", "!", "?", "'", "'", "\"", "~", "～", "〜"]
-    NoisePatterns []string  // default: bracket/paren/vol/ch/edition patterns
+    Separators    []string  // default: [".", "_", "-", ":", ";", ",", "!", "?", "'", "'", "\"", "~", "～", "〜", "&", "|", "•"]
+    NoisePatterns []string  // default: bracket/paren/vol/ch/edition/year patterns
     StopWords     []string  // default: ["the", "a", "an", "and", "of"]
 }
 ```
 
 NFKC and Unicode case fold are provided by `golang.org/x/text` and are not configurable — they follow the Unicode standard.
 
+Grammar expansion rules are stored in the package-level `GrammarRules` map (separate from `NormalizationConfig`). This allows runtime modification without reconstructing the normaliser.
+
 ## Exported Functions
 
 | Function | Purpose | Use at |
 |----------|---------|--------|
 | `New(config) *Normalizer` | Create normalizer instance | Any |
-| `(*Normalizer).Normalize(name) (string, error)` | Full canonical form (NFKC + supplemental → custom → case fold) | Comparison boundary |
+| `(*Normalizer).Normalize(name) (string, error)` | Full canonical form (NFKC + supplemental → grammar → custom → case fold) | Comparison boundary |
 | `(*Normalizer).MustNormalize(name) string` | Full canonical form (panics on error) | Comparison boundary |
 | `FoldUnicode(s string) string` | NFKC + supplemental fold (preserves case/words) | Storage boundary |
 | `NFKC(s string) string` | Raw NFKC only (no supplemental fold) | When NFKC alone is needed |
 | `NormalizeAltTitlesJSON(raw string) string` | Full normalize all values in alt_title JSON | Comparison boundary |
 | `NormalizeAllTitlesJSON(raw string) string` | NFKC + supplemental fold all values in alt_title JSON (preserves case/words) | Storage boundary |
+| `Similarity(a, b string) float64` | 0.0–1.0 string similarity score (normalised via FoldUnicode + lowercase) | Fuzzy matching |
+| `Match(a, b string, threshold float64) bool` | Threshold-gated similarity check | Fuzzy matching |
+| `BestMatch(query string, candidates []string, threshold float64) (int, float64, bool)` | Find best match in candidate list | Fuzzy matching |
 
 **Note**: The manual `unicodeFold` map is removed entirely. `FoldUnicode` now applies NFKC + supplemental fold. `FoldAltTitlesJSON` is removed — use `NormalizeAllTitlesJSON` for storage boundary JSON normalization.
 

@@ -85,6 +85,8 @@ func runBatch(cmd *cobra.Command, args []string) error {
 
 	var allResults []lookupOutput
 	cachedCount := 0
+	fuzzyFound := 0
+	fuzzyMultiple := 0
 	apiFound := 0
 	apiNotFound := 0
 	i := 0
@@ -94,8 +96,10 @@ func runBatch(cmd *cobra.Command, args []string) error {
 		if !batchJSON {
 			if result.Error != "" {
 				fmt.Printf("[%d/%d] [%s] %s — %s\n", i, len(unique), result.Source, result.Query, result.Error)
-			} else {
+			} else if result.Media != nil {
 				fmt.Printf("[%d/%d] [%s] %s\n", i, len(unique), result.Source, result.Media.Title)
+			} else {
+				fmt.Printf("[%d/%d] [%s] [fuzzy multiple] %s\n", i, len(unique), result.Source, result.Query)
 			}
 		}
 
@@ -104,6 +108,12 @@ func runBatch(cmd *cobra.Command, args []string) error {
 
 		if result.Source == pipeline.SourceDB {
 			cachedCount++
+		} else if result.Source == pipeline.SourceFuzzy {
+			if result.Media != nil {
+				fuzzyFound++
+			} else {
+				fuzzyMultiple++
+			}
 		} else if result.Source == pipeline.SourceAPI {
 			if result.Error != "" {
 				apiNotFound++
@@ -123,11 +133,20 @@ func runBatch(cmd *cobra.Command, args []string) error {
 	// Summary
 	notFound := apiNotFound
 	if batchLocal {
-		notFound = len(unique) - cachedCount
+		notFound = len(unique) - cachedCount - fuzzyFound - fuzzyMultiple
 	}
 
-	fmt.Printf("\n---\nSummary: Found: %d, Cached: %d, Not found: %d\n",
-		apiFound+cachedCount, cachedCount, notFound)
+	totalFound := cachedCount + fuzzyFound + apiFound
+
+	fmt.Printf("\n---\n%d processed — %d found (DB: %d, Fuzzy: %d, API: %d), %d fuzzy (multiple), %d not found\n",
+		len(unique), totalFound, cachedCount, fuzzyFound, apiFound, fuzzyMultiple, notFound)
+
+	if fuzzyMultiple > 0 {
+		fmt.Printf("  → Fuzzy (multiple): run `scrape lookup \"<title>\"` for each to disambiguate\n")
+	}
+	if notFound > 0 {
+		fmt.Printf("  → Not found: not on MangaDex — check manually or skip\n")
+	}
 
 	if batchShowUnmatched {
 		type unmatchedGroup struct {
@@ -171,7 +190,7 @@ func runBatch(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// parseInputFile reads a text or CSV file and returns a list of titles.
+// parseInputFile reads a .txt or .csv file and returns a list of titles.
 func parseInputFile(path string) ([]string, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 
@@ -185,6 +204,7 @@ func parseInputFile(path string) ([]string, error) {
 	}
 }
 
+// parseTextFile reads a line-per-title text file, skipping blanks and # comments.
 func parseTextFile(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -204,6 +224,7 @@ func parseTextFile(path string) ([]string, error) {
 	return titles, scanner.Err()
 }
 
+// parseCSVFile reads the first column of a CSV file as titles, skipping the header row.
 func parseCSVFile(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
