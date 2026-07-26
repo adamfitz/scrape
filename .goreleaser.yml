@@ -1,8 +1,10 @@
+version: 2
+
 project_name: scrape
 
 builds:
   - id: linux
-    main: .          # main package is in scrape.go at project root
+    main: .
     goos:
       - linux
     goarch:
@@ -11,11 +13,42 @@ builds:
       - "-X github.com/adamfitz/scrape/version.Version={{ .Version }}"
     binary: scrape
 
+  - id: windows
+    main: .
+    goos:
+      - windows
+    goarch:
+      - amd64
+    ldflags:
+      - "-X github.com/adamfitz/scrape/version.Version={{ .Version }}"
+    binary: scrape
+
 archives:
-  - format: tar.gz
-    builds:
+  - id: linux-archive
+    formats: ["tar.gz"]
+    ids:
       - linux
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+  - id: windows-archive
+    formats: ["zip"]
+    ids:
+      - windows
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+nfpms:
+  - id: scrape-deb
+    package_name: scrape
+    ids:
+      - linux
+    vendor: Adam
+    homepage: https://github.com/adamfitz/scrape
+    maintainer: Adam <adam@example.com>
+    description: Manga and media lookup tool via MangaDex API
+    license: MIT
+    formats:
+      - deb
+    bindir: /usr/bin
 
 changelog:
   use: git
@@ -24,4 +57,3 @@ release:
   github:
     owner: adamfitz
     name: scrape
-    # token will be passed via CLI in the workflow

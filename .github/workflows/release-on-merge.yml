@@ -34,10 +34,10 @@ jobs:
           echo "new_tag=${{ steps.tag_version.outputs.new_tag }}"
           echo "previous_tag=${{ steps.tag_version.outputs.previous_tag }}"
 
-      # 4. Push tag so GoReleaser sees it
-      - name: Push Tag
+      # 4. Fetch tags (tag was created via API, not locally)
+      - name: Fetch Tags
         if: steps.tag_version.outputs.new_tag != ''
-        run: git push origin ${{ steps.tag_version.outputs.new_tag }}
+        run: git fetch --tags
 
       # 5. Run GoReleaser
       - name: Run GoReleaser
