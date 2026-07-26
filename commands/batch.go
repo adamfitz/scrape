@@ -85,6 +85,8 @@ func runBatch(cmd *cobra.Command, args []string) error {
 
 	var allResults []lookupOutput
 	cachedCount := 0
+	fuzzyFound := 0
+	fuzzyMultiple := 0
 	apiFound := 0
 	apiNotFound := 0
 	i := 0
@@ -106,6 +108,12 @@ func runBatch(cmd *cobra.Command, args []string) error {
 
 		if result.Source == pipeline.SourceDB {
 			cachedCount++
+		} else if result.Source == pipeline.SourceFuzzy {
+			if result.Media != nil {
+				fuzzyFound++
+			} else {
+				fuzzyMultiple++
+			}
 		} else if result.Source == pipeline.SourceAPI {
 			if result.Error != "" {
 				apiNotFound++
@@ -125,11 +133,20 @@ func runBatch(cmd *cobra.Command, args []string) error {
 	// Summary
 	notFound := apiNotFound
 	if batchLocal {
-		notFound = len(unique) - cachedCount
+		notFound = len(unique) - cachedCount - fuzzyFound - fuzzyMultiple
 	}
 
-	fmt.Printf("\n---\nSummary: Found: %d, Cached: %d, Not found: %d\n",
-		apiFound+cachedCount, cachedCount, notFound)
+	totalFound := cachedCount + fuzzyFound + apiFound
+
+	fmt.Printf("\n---\n%d processed — %d found (DB: %d, Fuzzy: %d, API: %d), %d ambiguous, %d not found\n",
+		len(unique), totalFound, cachedCount, fuzzyFound, apiFound, fuzzyMultiple, notFound)
+
+	if fuzzyMultiple > 0 {
+		fmt.Printf("  → Ambiguous: run `scrape lookup \"<title>\"` for each to disambiguate\n")
+	}
+	if notFound > 0 {
+		fmt.Printf("  → Not found: not on MangaDex — check manually or skip\n")
+	}
 
 	if batchShowUnmatched {
 		type unmatchedGroup struct {

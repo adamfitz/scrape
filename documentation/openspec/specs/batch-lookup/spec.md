@@ -68,7 +68,7 @@ When `--local` is set, the API SHALL NOT be called. Only the local database is q
 - GIVEN 721 titles input
 - WHEN `scrape batch titles.txt -l` is executed
 - THEN all 721 titles SHALL be checked against the local database
-- AND the summary SHALL show: Found (cached), Not found
+- AND the summary SHALL show DB, Fuzzy, ambiguous, and not-found counts
 - AND NO API calls SHALL be made
 
 ### Requirement: Progress display
@@ -88,19 +88,27 @@ Individual title failures SHALL not abort the batch.
 After processing, a summary line SHALL be displayed:
 
 ```
-Summary: Found: N, Cached: N, Not found: N
+---
+713 processed — 630 found (DB: 600, Fuzzy: 30, API: 0), 11 ambiguous, 47 not found
+  → Ambiguous: run `scrape lookup "<title>"` for each to disambiguate
+  → Not found: not on MangaDex — check manually or skip
+---
 ```
 
-- `Found` = total found (cached + API)
-- `Cached` = found in local database
-- `Not found` = not found anywhere
+- `DB` = exact match via title_index
+- `Fuzzy` = single fuzzy match auto-linked via `LinkQuery` (reuses existing record)
+- `API` = found and ingested from MangaDex
+- `ambiguous` = multiple fuzzy candidates — user must disambiguate via `scrape lookup`
+- `not found` = not found in DB or MangaDex
+
+Actionable hints SHALL be printed when ambiguous or not-found counts are > 0.
 
 ### Requirement: Source indicator
 
 Each result line SHALL indicate `[db]`, `[fuzzy]`, or `[api]`.
 
 - `[db]` — exact match via title_index
-- `[fuzzy]` — fuzzy match via similarity scoring
+- `[fuzzy]` — single fuzzy match (auto-linked) or `[fuzzy] [fuzzy multiple]` for ambiguous matches
 - `[api]` — match via MangaDex API
 
 ### Requirement: Default output (minimal)
