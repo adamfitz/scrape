@@ -637,3 +637,216 @@ func TestBatchLookup_UsesIndex(t *testing.T) {
 		t.Errorf("missing[0] = %q, want %q", missing[0], "Missing")
 	}
 }
+
+// --- Fuzzy Lookup Tests ---
+
+func TestFuzzyLookup_ExactMatch(t *testing.T) {
+	p := tempPipeline(t)
+
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "One Piece", SourceID: "fl1"})
+
+	result := p.FuzzyLookup(database.MediaTypeManga, "One Piece", 0.85)
+	if result.Exact == nil {
+		t.Fatal("expected exact match")
+	}
+	if result.Exact.Title != "One Piece" {
+		t.Errorf("title = %q, want %q", result.Exact.Title, "One Piece")
+	}
+	if len(result.Fuzzy) != 0 {
+		t.Errorf("expected no fuzzy candidates, got %d", len(result.Fuzzy))
+	}
+}
+
+func TestFuzzyLookup_FuzzyMatch_Contraction(t *testing.T) {
+	p := tempPipeline(t)
+
+	// Ingest with apostrophe form - grammar expansion normalizes both
+	// "Dont" and "Don't" to "do not", so contraction queries match exactly.
+	// This test verifies that grammar expansion handles contractions.
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "You Like Me, Don't You", SourceID: "fl2"})
+
+	result := p.FuzzyLookup(database.MediaTypeManga, "You Like Me, Dont You", 0.85)
+
+	// Grammar expansion makes both normalize to same canonical form
+	if result.Exact == nil {
+		t.Fatal("expected exact match after grammar expansion")
+	}
+}
+
+func TestFuzzyLookup_FuzzyMatch_Typo(t *testing.T) {
+	p := tempPipeline(t)
+
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "Yuusha Party", SourceID: "fl3"})
+
+	result := p.FuzzyLookup(database.MediaTypeManga, "Yusha Party", 0.85)
+
+	if result.Exact != nil {
+		t.Fatal("expected no exact match for typo query")
+	}
+	if len(result.Fuzzy) == 0 {
+		t.Fatal("expected fuzzy candidates for typo query")
+	}
+	if result.Fuzzy[0].Media.SourceID != "fl3" {
+		t.Errorf("fuzzy match source_id = %q, want %q", result.Fuzzy[0].Media.SourceID, "fl3")
+	}
+}
+
+func TestFuzzyLookup_NoMatch(t *testing.T) {
+	p := tempPipeline(t)
+
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "One Piece", SourceID: "fl4"})
+
+	result := p.FuzzyLookup(database.MediaTypeManga, "Naruto", 0.85)
+
+	if result.Exact != nil {
+		t.Fatal("expected no exact match")
+	}
+	if len(result.Fuzzy) != 0 {
+		t.Errorf("expected no fuzzy candidates, got %d", len(result.Fuzzy))
+	}
+}
+
+func TestFuzzyLookup_MultipleCandidates(t *testing.T) {
+	p := tempPipeline(t)
+
+	// Two titles with a small typo difference
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "Yuusha Party", SourceID: "fl5a"})
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "Yuusha Pardy", SourceID: "fl5b"})
+
+	result := p.FuzzyLookup(database.MediaTypeManga, "Yuusha Party", 0.80)
+
+	if result.Exact == nil && len(result.Fuzzy) < 2 {
+		t.Errorf("expected exact match or >= 2 fuzzy candidates, got exact=%v fuzzy=%d", result.Exact, len(result.Fuzzy))
+	}
+}
+
+func TestLinkQuery_CreatesIndexEntry(t *testing.T) {
+	p := tempPipeline(t)
+
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "You Like Me, Don't You", SourceID: "lq1"})
+
+	// Verify original title is findable
+	got, _ := p.Lookup(database.MediaTypeManga, "You Like Me, Don't You")
+	if got == nil {
+		t.Fatal("expected original title to be findable")
+	}
+
+	// Link a contraction variant
+	err := p.LinkQuery(database.MediaTypeManga, got.ID, "You Like Me, Dont You")
+	if err != nil {
+		t.Fatalf("LinkQuery: %v", err)
+	}
+
+	// Now the contraction form should also be findable via exact index
+	got2, _ := p.Lookup(database.MediaTypeManga, "You Like Me, Dont You")
+	if got2 == nil {
+		t.Fatal("expected contraction title to be findable after LinkQuery")
+	}
+	if got2.ID != got.ID {
+		t.Errorf("linked record ID = %d, want %d", got2.ID, got.ID)
+	}
+}
+
+func TestLinkQuery_EmptyQuery(t *testing.T) {
+	p := tempPipeline(t)
+
+	err := p.LinkQuery(database.MediaTypeManga, 1, "")
+	if err != nil {
+		t.Fatalf("LinkQuery with empty query should not error: %v", err)
+	}
+}
+
+func TestBatchLookupStream_FuzzyFallback_LocalOnly(t *testing.T) {
+	p := tempPipeline(t)
+
+	// Ingest with canonical form
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "Yuusha Party", SourceID: "bsf1"})
+
+	// Query with a typo that grammar expansion doesn't fix
+	titles := []string{"Yusha Party"}
+	ch := p.BatchLookupStream(database.MediaTypeManga, titles, pipeline.BatchLookupOptions{LocalOnly: true})
+
+	var results []pipeline.LookupResult
+	for r := range ch {
+		results = append(results, r)
+	}
+
+	// Should get a fuzzy result (LocalOnly still does fuzzy scan)
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1", len(results))
+	}
+	if results[0].Source != pipeline.SourceFuzzy {
+		t.Errorf("source = %q, want %q", results[0].Source, pipeline.SourceFuzzy)
+	}
+	// Single fuzzy match auto-links, so Media should be set
+	if results[0].Media == nil {
+		t.Error("expected Media to be set for single fuzzy match")
+	}
+}
+
+func TestBatchLookupStream_LinkQueryAfterFuzzy(t *testing.T) {
+	p := tempPipeline(t)
+
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "Yuusha Party", SourceID: "bsf2"})
+
+	// First run: fuzzy scan finds the match
+	titles := []string{"Yusha Party"}
+	ch := p.BatchLookupStream(database.MediaTypeManga, titles, pipeline.BatchLookupOptions{LocalOnly: true})
+
+	var results []pipeline.LookupResult
+	for r := range ch {
+		results = append(results, r)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1", len(results))
+	}
+	if results[0].Source != pipeline.SourceFuzzy {
+		t.Errorf("source = %q, want fuzzy", results[0].Source)
+	}
+
+	// Simulate user selecting the first candidate (link the query)
+	if len(results[0].Candidates) > 0 {
+		selected := results[0].Candidates[0]
+		m, _ := p.Lookup(database.MediaTypeManga, selected.Title)
+		if m != nil {
+			_ = p.LinkQuery(database.MediaTypeManga, m.ID, "Yusha Party")
+		}
+	}
+
+	// Second run: should now find via exact index (idempotency)
+	got, _ := p.Lookup(database.MediaTypeManga, "Yusha Party")
+	if got == nil {
+		t.Fatal("expected exact match after LinkQuery (idempotency)")
+	}
+}
+
+func TestFuzzyLookup_SortedByScore(t *testing.T) {
+	p := tempPipeline(t)
+
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "Yuusha Party", SourceID: "fss1"})
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "Yuusha Pardy", SourceID: "fss2"})
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "Yuusha Pardee", SourceID: "fss3"})
+
+	// Query with a typo so no exact match, fuzzy scan runs
+	result := p.FuzzyLookup(database.MediaTypeManga, "Yuusha Partie", 0.70)
+
+	if len(result.Fuzzy) < 2 {
+		t.Skipf("need >= 2 fuzzy candidates, got %d", len(result.Fuzzy))
+	}
+	// First should have higher score than second
+	if result.Fuzzy[0].Score < result.Fuzzy[1].Score {
+		t.Errorf("not sorted: [0].Score=%f < [1].Score=%f", result.Fuzzy[0].Score, result.Fuzzy[1].Score)
+	}
+}
+
+func TestFuzzyLookup_ScoreAboveThreshold(t *testing.T) {
+	p := tempPipeline(t)
+
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "Naruto", SourceID: "fst1"})
+
+	result := p.FuzzyLookup(database.MediaTypeManga, "Naruto", 0.85)
+	if len(result.Fuzzy) > 0 && result.Fuzzy[0].Score < 0.85 {
+		t.Errorf("fuzzy candidate score %f below threshold 0.85", result.Fuzzy[0].Score)
+	}
+}

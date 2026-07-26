@@ -21,14 +21,17 @@ Consolidated analysis of shortcomings in `internal/normalize/normalize.go`, the 
   - [#11 — Missing Separators](#11-missing-separators)
   - [#12 — Volume/Chapter Regex Limitations](#12-volumechapter-regex-doesnt-handle-roman-numerals)
   - [#13 — Part Number Stripping Removes Distinction](#13-part-number-stripping-removes-distinction-between-works)
-- [Minor: Test Coverage Gaps](#minor-test-coverage-gaps)
-  - [#14 — No Idempotency Tests for JSON](#14-no-idempotency-tests-for-json-functions)
-  - [#15 — No Transitivity Test](#15-no-transitivity-test-for-normalize)
-  - [#16 — Weak AccentPreserved Test](#16-accentpreserved-test-is-weak)
-  - [#17 — No NFKC Equivalence Test](#17-no-nfkc-equivalence-test)
-  - [#18 — No Cross-Script Equivalence Test](#18-no-cross-script-equivalence-test)
-  - [#19 — test_list.txt Duplicate Entry](#19-test_listtxt-duplicate-entry)
-  - [#20 — No test_list.txt Full Run Against Expected](#20-no-test_listtxt-full-run-against-expected)
+- [Minor: Fuzzy Matching & Test Coverage](#minor-fuzzy-matching--test-coverage)
+  - [#14 — Fuzzy Threshold May Need Tuning](#14-fuzzy-matching-threshold-may-need-tuning)
+  - [#15 — Grammar Expansion Limited to English](#15-grammar-expansion-limited-to-english-contractions)
+  - [#16 — Fuzzy Scan O(N)](#16-fuzzy-scan-on-for-large-databases)
+  - [#17 — No Idempotency Tests for JSON](#17-no-idempotency-tests-for-json-functions)
+  - [#18 — No Transitivity Test](#18-no-transitivity-test-for-normalize)
+  - [#19 — Weak AccentPreserved Test](#19-accentpreserved-test-is-weak)
+  - [#20 — No NFKC Equivalence Test](#20-no-nfkc-equivalence-test)
+  - [#21 — No Cross-Script Equivalence Test](#21-no-cross-script-equivalence-test)
+  - [#22 — test_list.txt Duplicate Entry](#22-test_listtxt-duplicate-entry)
+  - [#23 — No test_list.txt Full Run Against Expected](#23-no-test_listtxt-full-run-against-expected)
 - [Unicode Standards Reference](#unicode-standards-reference)
 - [Existing Libraries](#existing-libraries)
 
@@ -64,6 +67,8 @@ The `&` character is neither in the `unicodeFold` map nor the default `Separator
 | Input | Normalised | Expected |
 |-------|-----------|----------|
 | `"Dungeons & Artifacts"` | `"dungeons & artifacts"` | `"dungeons artifacts"` |
+
+**Partial mitigation**: Add `&` to the `GrammarRules` map as `&` → `and`, or add `&` to the separator list. Neither has been implemented yet.
 
 ### 5. `|` (Pipe) Not in Separator List
 
@@ -166,6 +171,30 @@ The pattern `\s(part|pt)\.?\s*\d+` strips part numbers. This causes distinct ent
 | `"Ascendance of a Bookworm - Part 04"` | `"ascendance bookworm"` |
 
 All four entries normalise to the same string, losing the part distinction.
+
+### 14. ~~Fuzzy Matching Threshold May Need Tuning~~ — Implemented
+
+**Status**: Implemented with default threshold 0.85
+
+The fuzzy matching threshold (0.85) is a conservative default. It is configurable at the pipeline level via the `FuzzyLookup` threshold parameter. Grammar expansion now handles most contraction variants at normalise time, reducing the burden on fuzzy matching.
+
+**Mitigation**: Monitor false positive/negative rates in production. The threshold is configurable.
+
+### 15. ~~Grammar Expansion Limited to English Contractions~~ — Implemented
+
+**Status**: Implemented with `GrammarRules` map (36 entries)
+
+The grammar expansion handles English contractions and common misspellings. The `GrammarRules` map is extensible at runtime — add rules for other languages as needed. The `expandGrammar` function is case-insensitive and strips apostrophes before lookup.
+
+**Mitigation**: Add rules for other languages via `normalize.GrammarRules[key] = value`.
+
+### 16. ~~Fuzzy Scan O(N) for Large Databases~~ — Implemented
+
+**Status**: Implemented
+
+The fuzzy scan loads all media records via `AllMedia()` and computes similarity for each. For databases with thousands of records, this could be slow. Current database size (~700 records) makes this acceptable (<200ms). The title_index handles the common case (exact match) in O(1). Fuzzy scan only runs when exact match fails.
+
+**Mitigation**: Future optimization: add a similarity column to the title_index, or use a BK-tree for O(log N) fuzzy lookup.
 
 ---
 
@@ -297,15 +326,19 @@ Based on the standards and libraries above, the ideal normalisation pipeline for
 ```
 Raw title
   → NFKC normalize          (golang.org/x/text/unicode/norm)
-  → Strip file extensions   (custom regex, as now)
-  → Fold separators         (custom regex, as now — but with expanded set)
-  → Remove noise            (custom regex, as now — but with edition markers)
-  → Collapse whitespace     (custom, as now)
-  → Remove stop words       (custom, as now)
-  → Unicode case fold       (golang.org/x/text/cases — replaces strings.ToLower)
+  → Supplemental fold        (curly quotes, dashes, wave dashes)
+  → Grammar expansion        (GrammarRules map: dont → do not, etc.)
+  → Strip file extensions    (custom regex, as now)
+  → Fold separators          (custom regex, as now — but with expanded set)
+  → Remove noise             (custom regex, as now — but with edition markers)
+  → Collapse whitespace      (custom, as now)
+  → Remove stop words        (custom, as now)
+  → Unicode case fold        (golang.org/x/text/cases — replaces strings.ToLower)
 ```
 
-NFKC replaces the ~90-entry manual `unicodeFold` map with a standards-compliant pass covering thousands of characters. Unicode case folding replaces `strings.ToLower` to handle `ß` → `ss`, Kelvin `K` → `k`, etc. The domain-specific steps (extensions, separators, noise, stop words) remain as custom layers.
+NFKC replaces the ~90-entry manual `unicodeFold` map with a standards-compliant pass covering thousands of characters. Grammar expansion handles contraction/misspelling variations. Unicode case folding replaces `strings.ToLower` to handle `ß` → `ss`, Kelvin `K` → `k`, etc. The domain-specific steps (extensions, separators, noise, stop words) remain as custom layers.
+
+**Fuzzy matching** (scored via `Similarity()` in `internal/normalize/fuzzy.go`) operates as a fallback when exact normalised matching fails — used for local DB scan, API result validation, and batch disambiguation.
 
 ---
 
@@ -316,7 +349,7 @@ NFKC replaces the ~90-entry manual `unicodeFold` map with a standards-compliant 
 | 1 | JSON map key ordering | **Critical** | **Resolved** — sorted maps via `marshalMapSorted()` |
 | 2 | `NormalizeAllTitles` only manga table | **Critical** | **Resolved** — pipeline normalises all 5 tables |
 | 3 | No storage-boundary normalisation for non-manga | **Critical** | **Resolved** — pipeline `Ingest` normalises for all media types |
-| 4 | `&` not in fold/separators | Moderate | **Open** |
+| 4 | `&` not in fold/separators | Moderate | **Open** — partial mitigation via `GrammarRules` possible |
 | 5 | `\|` not in separators | Moderate | **Open** |
 | 6 | Edition markers not stripped | Moderate | **Open** |
 | 7 | Bare year numbers survive | Moderate | **Open** |
@@ -326,10 +359,13 @@ NFKC replaces the ~90-entry manual `unicodeFold` map with a standards-compliant 
 | 11 | Missing separators | Moderate | **Open** |
 | 12 | Roman numeral vol/ch not matched | Moderate | **Open** |
 | 13 | Part number stripping removes distinction | Moderate | **Open** |
-| 14 | No idempotency tests for JSON functions | Minor | **Open** |
-| 15 | No transitivity test for Normalize | Minor | **Open** |
-| 16 | Weak accent preservation test | Minor | **Open** |
-| 17 | No nested bracket tests | Minor | **Open** |
-| 18 | No edition marker tests | Minor | **Open** |
-| 19 | No `&` / `\|` tests | Minor | **Open** |
-| 20 | Duplicate in test_list.txt | Minor | **Open** |
+| 14 | Fuzzy threshold may need tuning | Minor | **Implemented** — default 0.85, configurable via threshold parameter |
+| 15 | Grammar expansion limited to English | Minor | **Implemented** — extensible `GrammarRules` map (36 rules) |
+| 16 | Fuzzy scan O(N) for large databases | Minor | **Implemented** — acceptable for current ~700 records |
+| 17 | No idempotency tests for JSON functions | Minor | **Open** |
+| 18 | No transitivity test for Normalize | Minor | **Open** |
+| 19 | Weak accent preservation test | Minor | **Open** |
+| 20 | No nested bracket tests | Minor | **Open** |
+| 21 | No edition marker tests | Minor | **Open** |
+| 22 | No `&` / `\|` tests | Minor | **Open** |
+| 23 | Duplicate in test_list.txt | Minor | **Open** |

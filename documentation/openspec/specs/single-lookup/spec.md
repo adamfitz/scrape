@@ -30,20 +30,35 @@ The tool SHALL provide a `scrape lookup <title>` command.
 
 ### Requirement: Local-first strategy
 
-The database SHALL be checked before any API calls.
+The database SHALL be checked before any API calls. The lookup uses a tiered strategy:
 
-#### Scenario: Title found locally
+1. **Tier 1: Exact match** — O(1) via pre-computed title_index
+2. **Tier 2: Fuzzy scan** — O(N) via similarity scoring against all stored titles
+3. **Tier 3: MangaDex API** — only if tiers 1 and 2 fail
+
+#### Scenario: Title found locally (exact)
 
 - GIVEN "One Piece" exists in the local database
 - WHEN `scrape lookup "One Piece"` is executed
-- THEN no API call SHALL be made
+- THEN tier 1 SHALL match
+- AND no API call SHALL be made
 - AND the cached result SHALL be displayed with `[db]` source indicator
+
+#### Scenario: Title found locally (fuzzy)
+
+- GIVEN the database stores "You're Under My Skin!" (with apostrophe)
+- WHEN `scrape lookup "Youre under my Skin"` is executed
+- THEN tier 1 SHALL miss (normalised forms differ)
+- AND tier 2 SHALL find the match via fuzzy similarity
+- AND the result SHALL be displayed with `[fuzzy]` source indicator
+- AND `LinkQuery` SHALL add an index entry for future exact matches
 
 #### Scenario: Title not found locally
 
-- GIVEN "One Piece" does not exist in the local database
-- WHEN `scrape lookup "One Piece"` is executed
-- THEN a MangaDex API call SHALL be made
+- GIVEN "Unknown Manga" does not exist in the local database
+- WHEN `scrape lookup "Unknown Manga"` is executed
+- THEN tiers 1 and 2 SHALL miss
+- AND a MangaDex API call SHALL be made
 - AND the result SHALL be stored in the local database
 - AND the result SHALL be displayed with `[api]` source indicator
 
@@ -101,7 +116,7 @@ Successful MangaDex lookups SHALL be automatically stored in the local database.
 
 ### Requirement: Source indicator
 
-Every output line SHALL indicate whether the result came from the local database (`[db]`) or the MangaDex API (`[api]`).
+Every output line SHALL indicate whether the result came from the local database (`[db]`), fuzzy matching (`[fuzzy]`), or the MangaDex API (`[api]`).
 
 ### Requirement: English title resolution
 
@@ -127,7 +142,7 @@ When a manga is found via the MangaDex API, the tool SHALL check if a record wit
 
 ### Requirement: Result validation
 
-The tool SHALL NOT blindly accept the first MangaDex result. The tool SHALL iterate through the returned results and only accept a result where the normalized query appears as a substring in at least one of the result's titles (primary + alt titles, after normalization). If no result matches, the tool SHALL report "no matching result on MangaDex" and SHALL NOT store anything.
+The tool SHALL NOT blindly accept the first MangaDex result. The tool SHALL iterate through the returned results and only accept a result where the normalized query appears as a substring in at least one of the result's titles (primary + alt titles, after normalization). If no result matches via substring, the tool SHALL attempt fuzzy similarity matching (threshold >= 0.85) as a 4th strategy. If no result matches even fuzzily, the tool SHALL report "no matching result on MangaDex" and SHALL NOT store anything.
 
 #### Scenario: MangaDex returns wrong match
 

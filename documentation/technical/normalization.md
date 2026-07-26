@@ -31,11 +31,11 @@ There are two levels of normalisation used in the codebase:
 
 ## When It Is Applied
 
-- **On write** (`InsertManga`, `UpdateManga`): NFKC normalization only. Titles are stored in a readable, canonical-Unicode form.
-- **On read** (`GetMangaByTitle`, `GetMangaByTitleFuzzy`, `BatchCheckTitlesFuzzy`): Full normalisation is applied to both the query and every stored title before comparison.
-- **On API calls**: User queries are fully normalised before being sent to MangaDex.
-- **On deduplication** (`batch.go`): Input titles are fully normalised to detect duplicates.
-- **On maintenance** (`scrape maintenance normalize`): Re-applies NFKC normalization to every row idempotently.
+- **On write** (`Ingest`, `UpsertMedia`): NFKC normalization for stored title. The title_index IS built with full normalisation (including grammar expansion) via `reindexMedia()`, so contraction variants are indexable at write time.
+- **On read** (`Lookup`, `FuzzyLookup`, `BatchLookup`): Full normalisation is applied to both the query and every stored title before comparison. Grammar expansion handles contraction variants (case-insensitive, apostrophe-stripping). Fuzzy similarity scoring is used as a fallback when exact match fails.
+- **On API calls**: User queries are fully normalised before being sent to MangaDex (including grammar expansion). API results are validated with 4 strategies: substring, space-removed, apostrophe-stripped, and fuzzy similarity.
+- **On deduplication** (`batch.go`): Input titles are fully normalised to detect duplicates (grammar expansion ensures "Dont" and "Don't" deduplicate).
+- **On maintenance** (`scrape maintenance normalize`): Re-applies NFKC normalization to every row idempotently. Rebuilds the title_index with the updated normalisation.
 
 ## Input / Output Examples
 
@@ -50,6 +50,8 @@ There are two levels of normalisation used in the codebase:
 | `"Hero\u2019s Party"` | `"heros party"` |
 | `"Ｍｏｎｓｔｅｒ ＃８"` | `"monster #8"` (fullwidth → ASCII via NFKC) |
 | `"straße"` | `"strasse"` (ß → ss via case fold) |
+| `"You Like Me, Dont You"` | `"you like me do not you"` (grammar expansion) |
+| `"Youre Under My Skin"` | `"you are under my skin"` (grammar expansion) |
 
 ## Technical Implementation
 
@@ -62,12 +64,13 @@ The normaliser is implemented in `internal/normalize/normalize.go`. It depends o
 The `Normalize()` method applies these steps in order:
 
 1. **NFKC normalize + supplemental fold** -- Unicode NFKC via `golang.org/x/text/unicode/norm`, then a supplemental fold map for ~25 characters NFKC misses (curly quotes, en/em dashes, wave dashes, typographic symbols).
-2. **Extension strip** -- Remove common media file extensions (`.cbz`, `.mkv`, `.epub`, etc.) using a pre-compiled regex.
-3. **Separator fold** -- Replace punctuation separators (`.`, `_`, `-`, `:`, `;`, `,`, `!`, `?`, `'`, `"`, `~`, and their fullwidth variants) with spaces via a dynamically built character-class regex.
-4. **Noise removal** -- Strip bracketed tags `[...]`, parenthesised notes `(...)`, and volume/chapter/part markers (e.g. `Vol. 3`, `Ch 1090`, `Part 2`) using a case-insensitive combined regex.
-5. **Multi-space collapse** -- Repeatedly collapse double spaces into single spaces.
-6. **Stop word removal** -- Filter out common words (`the`, `a`, `an`, `and`, `of` by default) from the word list.
-7. **Unicode case fold** -- Case-insensitive folding via `golang.org/x/text/cases`. Replaces `strings.ToLower` to handle locale-aware case mappings (`ß → ss`, Kelvin `K → k`, etc.).
+2. **Grammar expansion** -- Expand common English contractions and misspellings using the extensible `GrammarRules` map (e.g., `dont` → `do not`, `youre` → `you are`). Applied after fold, before separator folding. Ensures contracted and expanded forms normalise identically.
+3. **Extension strip** -- Remove common media file extensions (`.cbz`, `.mkv`, `.epub`, etc.) using a pre-compiled regex.
+4. **Separator fold** -- Replace punctuation separators (`.`, `_`, `-`, `:`, `;`, `,`, `!`, `?`, `'`, `"`, `~`, and their fullwidth variants) with spaces via a dynamically built character-class regex.
+5. **Noise removal** -- Strip bracketed tags `[...]`, parenthesised notes `(...)`, and volume/chapter/part markers (e.g. `Vol. 3`, `Ch 1090`, `Part 2`) using a case-insensitive combined regex.
+6. **Multi-space collapse** -- Repeatedly collapse double spaces into single spaces.
+7. **Stop word removal** -- Filter out common words (`the`, `a`, `an`, `and`, `of` by default) from the word list.
+8. **Unicode case fold** -- Case-insensitive folding via `golang.org/x/text/cases`. Replaces `strings.ToLower` to handle locale-aware case mappings (`ß → ss`, Kelvin `K → k`, etc.).
 
 ### NFKC Normalization
 
@@ -98,12 +101,52 @@ The legacy name `FoldAltTitlesJSON` is retained as a deprecated alias for `Norma
 
 ### Result Validation
 
-The `queryMatchesAnyTitle` function in `commands/lookup.go` verifies MangaDex results match the user's query using three strategies:
+The `queryMatchesAnyTitle` function in `internal/pipeline/pipeline.go` verifies MangaDex results match the user's query using four strategies:
 
 1. Normal substring match
 2. Space-removed substring match (handles apostrophe-to-space folding)
 3. Apostrophe-stripped match (handles `"Reader's"` vs `"Readers"`)
+4. **Fuzzy similarity** — computes `normalize.Similarity(normalizedQuery, normalized)` and accepts if score >= 0.85 (handles grammar variations, typos, word reordering)
 
+### Fuzzy Scoring Functions
+
+The `internal/normalize/fuzzy.go` module provides pure functions for string similarity scoring. These are used by the pipeline for fuzzy local lookups, batch disambiguation, and API result validation.
+
+| Function | Purpose |
+|----------|---------|
+| `Similarity(a, b string) float64` | Returns 0.0–1.0 similarity score. Normalises both inputs via `FoldUnicode + strings.ToLower` before scoring. |
+| `Match(a, b string, threshold float64) bool` | Threshold-gated similarity check. |
+| `BestMatch(query string, candidates []string, threshold float64) (int, float64, bool)` | Find best match in candidate list. |
+
+**Scoring strategy** (in `Similarity`):
+1. Exact match → 1.0
+2. Substring containment → 0.95
+3. Token Jaccard (word-level set similarity) → handles word reordering
+4. Levenshtein (character edit distance) → handles typos
+5. Result = max(token Jaccard, Levenshtein similarity)
+
+### Grammar Expansion
+
+The `GrammarRules` map in `internal/normalize/normalize.go` defines contraction/misspelling expansions applied during normalisation. The map is package-level and extensible at runtime.
+
+```go
+var GrammarRules = map[string]string{
+    "dont":    "do not",
+    "doesnt":  "does not",
+    "youre":   "you are",
+    "its":     "it is",
+    "lets":    "let us",
+    // ... (36 rules total — see spec for full list)
+}
+```
+
+The `expandGrammar` function is **case-insensitive** and **strips apostrophes** (ASCII `'`, curly `\u2018`/`\u2019`, modifier letter `\u02BC`) before looking up words. This means all of the following produce the same canonical output:
+
+- `"Dont"` → lowercase `"dont"` → GrammarRules match → `"do not"`
+- `"Don't"` → lowercase `"don't"` → strip apostrophe → `"dont"` → `"do not"`
+- `"don\u2019t"` → lowercase `"don\u2019t"` → strip apostrophe → `"dont"` → `"do not"`
+
+All three forms normalise to the same canonical output, ensuring idempotent matching.
 ### Configuration
 
 All rules are configurable via `NormalizationConfig`:
@@ -126,7 +169,8 @@ Calling `New()` with a zero-value config applies all defaults automatically.
 flowchart TD
     A[Raw Title] --> B[NFKC Normalize]
     B --> B2[Supplemental Fold]
-    B2 --> C[Strip File Extension]
+    B2 --> B3[Grammar Expansion]
+    B3 --> C[Strip File Extension]
     C --> D[Fold Separators to Spaces]
     D --> E[Remove Noise Patterns]
     E --> F[Trim & Collapse Whitespace]
@@ -147,6 +191,12 @@ flowchart TD
         B2d['© ® ° × ÷ → ASCII']
     end
 
+    subgraph "Grammar Expansion"
+        B3a["dont → do not"]
+        B3b["youre → you are"]
+        B3c["cant → can not"]
+    end
+
     subgraph "Noise Patterns"
         E1('bracketed tags')
         E2('parenthesised notes')
@@ -155,6 +205,12 @@ flowchart TD
 
     subgraph "Separators"
         D1['. _ - : ; , ! ? ~ etc.']
+    end
+
+    subgraph "Fuzzy Scoring (pipeline)"
+        F1['Token Jaccard (word overlap)']
+        F2['Levenshtein (edit distance)']
+        F3['max(jaccard, levenshtein)']
     end
 
     style A fill:#f9f,stroke:#333

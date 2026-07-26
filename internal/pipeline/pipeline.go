@@ -68,8 +68,9 @@ func (e *PipelineError) Unwrap() error {
 type Source string
 
 const (
-	SourceDB  Source = "db"
-	SourceAPI Source = "api"
+	SourceDB    Source = "db"
+	SourceAPI   Source = "api"
+	SourceFuzzy Source = "fuzzy"
 )
 
 // AltTitleData is the structured format for multi-language title variants.
@@ -263,6 +264,29 @@ func queryMatchesAnyTitle(normalizedQuery string, result mangadex.MangaResult, n
 		for _, t := range alt {
 			if t != "" && check(t) {
 				return true
+			}
+		}
+	}
+
+	// 4th strategy: fuzzy similarity
+	if normalizedQuery != "" {
+		fuzzyCheck := func(rawTitle string) bool {
+			normalized := n.MustNormalize(rawTitle)
+			if normalize.Similarity(normalizedQuery, normalized) >= 0.85 {
+				return true
+			}
+			return false
+		}
+		for _, t := range result.Attributes.Title {
+			if t != "" && fuzzyCheck(t) {
+				return true
+			}
+		}
+		for _, alt := range result.Attributes.AltTitles {
+			for _, t := range alt {
+				if t != "" && fuzzyCheck(t) {
+					return true
+				}
 			}
 		}
 	}
@@ -493,7 +517,41 @@ func (p *Pipeline) BatchLookupStream(mediaType database.MediaType, titles []stri
 			}
 		}
 
-		if len(missing) == 0 || opts.LocalOnly {
+		if len(missing) == 0 {
+			return
+		}
+
+		// Tier 2: Fuzzy scan against local DB before hitting API
+		var stillMissing []string
+		for _, title := range missing {
+			queryNorm := p.normaliser.MustNormalize(title)
+			candidates := p.fuzzyScan(mediaType, queryNorm, 0.85)
+			if len(candidates) == 0 {
+				stillMissing = append(stillMissing, title)
+				continue
+			}
+			if len(candidates) == 1 {
+				// Single fuzzy match — link query to existing record
+				_ = p.LinkQuery(mediaType, candidates[0].Media.ID, title)
+				ch <- LookupResult{Media: candidates[0].Media, Source: SourceFuzzy, Query: title}
+				continue
+			}
+			// Multiple fuzzy candidates — emit for disambiguation
+			cands := make([]Candidate, len(candidates))
+			for i, fc := range candidates {
+				cands[i] = Candidate{
+					Title:     fc.Title,
+					SourceID:  fc.Media.SourceID,
+					Language:  fc.Media.Language,
+					URL:       fc.Media.URL,
+					Status:    fc.Media.Status,
+					DescEn:    fc.Media.Description,
+				}
+			}
+			ch <- LookupResult{Source: SourceFuzzy, Query: title, Candidates: cands}
+		}
+
+		if opts.LocalOnly {
 			return
 		}
 
@@ -505,7 +563,7 @@ func (p *Pipeline) BatchLookupStream(mediaType database.MediaType, titles []stri
 			limit = 5
 		}
 
-		for _, title := range missing {
+		for _, title := range stillMissing {
 			apiQuery := QueryForAPI(title)
 			apiResults, err := client.SearchManga(apiQuery, limit)
 			if err != nil {
@@ -550,6 +608,85 @@ func (p *Pipeline) BatchLookupStream(mediaType database.MediaType, titles []stri
 	}()
 
 	return ch
+}
+
+// FuzzyCandidate represents a local DB record found by fuzzy matching.
+type FuzzyCandidate struct {
+	Media *database.Media
+	Score float64
+	Title string // the matched title string
+}
+
+// FuzzyLookupResult is the result of a local fuzzy scan.
+type FuzzyLookupResult struct {
+	Exact     *database.Media   // exact index match (preferred)
+	Fuzzy     []FuzzyCandidate  // candidates above fuzzy threshold
+	Query     string
+	QueryNorm string
+}
+
+// fuzzyScan scans allMedia for fuzzy matches against queryNorm.
+// Returns candidates sorted by score descending.
+func (p *Pipeline) fuzzyScan(mediaType database.MediaType, queryNorm string, threshold float64) []FuzzyCandidate {
+	all, err := p.db.AllMedia(mediaType)
+	if err != nil {
+		return nil
+	}
+	var candidates []FuzzyCandidate
+	for i := range all {
+		titles := allTitles(&all[i])
+		for _, raw := range titles {
+			norm := p.normaliser.MustNormalize(raw)
+			score := normalize.Similarity(queryNorm, norm)
+			if score >= threshold {
+				candidates = append(candidates, FuzzyCandidate{
+					Media: &all[i],
+					Score: score,
+					Title: raw,
+				})
+				break // one match per media record is enough
+			}
+		}
+	}
+	// Sort by score descending (simple bubble — small N)
+	for i := 0; i < len(candidates); i++ {
+		for j := i + 1; j < len(candidates); j++ {
+			if candidates[j].Score > candidates[i].Score {
+				candidates[i], candidates[j] = candidates[j], candidates[i]
+			}
+		}
+	}
+	return candidates
+}
+
+// FuzzyLookup performs a local-only lookup with fuzzy fallback.
+// Returns the exact match if found, otherwise returns fuzzy candidates.
+func (p *Pipeline) FuzzyLookup(mediaType database.MediaType, query string, threshold float64) *FuzzyLookupResult {
+	queryNorm := p.normaliser.MustNormalize(query)
+	result := &FuzzyLookupResult{Query: query, QueryNorm: queryNorm}
+
+	// Try exact index match first
+	media, _ := p.Lookup(mediaType, query)
+	if media != nil {
+		result.Exact = media
+		return result
+	}
+
+	// Fuzzy scan
+	result.Fuzzy = p.fuzzyScan(mediaType, queryNorm, threshold)
+	return result
+}
+
+// LinkQuery links a fuzzy-matched title back to an existing media record by
+// inserting a secondary entry in the title index. This ensures subsequent
+// exact-match lookups find the record without re-scanning.
+func (p *Pipeline) LinkQuery(mediaType database.MediaType, mediaID int64, query string) error {
+	queryNorm := p.normaliser.MustNormalize(query)
+	if queryNorm == "" {
+		return nil
+	}
+	index := map[string]string{queryNorm: query}
+	return p.db.IndexTitles(mediaType, mediaID, index)
 }
 
 // NormalizeAllTitles re-normalises every title and alt_title across all

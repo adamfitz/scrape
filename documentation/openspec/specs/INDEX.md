@@ -11,7 +11,7 @@ CLI Commands (cobra)
   |
   +--> Pipeline (shared library)
   |      |
-  |      +--> Normalise: NFKC + supplemental fold + custom layers
+  |      +--> Normalise: NFKC + supplemental fold + grammar expansion + custom layers
   |      +--> Data: local DB + MangaDex API
   |      +--> All data ingestion flows through pipeline
   |
@@ -19,6 +19,8 @@ CLI Commands (cobra)
   |      |
   |      +--> Unicode folding: confusable chars → ASCII (storage boundary)
   |      +--> Normalize raw titles to canonical forms (comparison boundary)
+  |      +--> Grammar expansion: contractions → expanded forms
+  |      +--> Fuzzy scoring: Levenshtein + token Jaccard similarity
   |
   +--> MangaDex API Client (with rate limiting)
   |      |
@@ -46,7 +48,7 @@ CLI Commands (cobra)
 | 8 | [Database Maintenance](database-maintenance/spec.md) | SQLite VACUUM, integrity checks, and title normalization | Planned |
 | 9 | [Shared Library](shared-library/spec.md) | Reusable packages: normalize, ratelimit, config, database | Planned |
 | 10 | [CLI Commands](cli-commands/spec.md) | Cobra command structure and flag definitions | Planned |
-| 11 | [Fuzzy Matching](fuzzy-matching/spec.md) | Sorensen-Dice similarity for approximate title matching | **Removed** — normalisation handles systematic variants; API handles typos |
+| 11 | [Fuzzy Matching](fuzzy-matching/spec.md) | Tiered approximate matching: grammar expansion + token Jaccard + Levenshtein + fuzzy API validation | Active |
 
 ## Shared Library Policy
 
@@ -56,8 +58,8 @@ All reusable functions MUST be placed in shared packages under `internal/`. No p
 
 | Package | Location | Purpose |
 |---------|----------|---------|
-| `normalize` | `internal/normalize/` | NFKC + supplemental fold + Unicode case fold + custom layers |
-| `pipeline` | `internal/pipeline/` | Composes normalise + data: Lookup, LookupAPI, BatchLookupStream, Ingest |
+| `normalize` | `internal/normalize/` | NFKC + supplemental fold + grammar expansion + Unicode case fold + fuzzy scoring |
+| `pipeline` | `internal/pipeline/` | Composes normalise + data: Lookup, FuzzyLookup, BatchLookupStream, LinkQuery, Ingest |
 | `ratelimit` | `internal/ratelimit/` | Token bucket rate limiter for API calls |
 | `config` | `internal/config/` | Config directory, paths, app settings |
 | `database` | `internal/database/` | SQLite connection, migrations, schema (media-agnostic) |

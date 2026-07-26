@@ -392,3 +392,86 @@ func TestNormalizeAltTitlesJSON_Structured(t *testing.T) {
 		t.Errorf("NormalizeAltTitlesJSON did not fold: %s", got)
 	}
 }
+
+func TestGrammarExpansion_Contraction(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	got := n.MustNormalize("You Like Me, Dont You")
+	want := n.MustNormalize("You Like Me, Do Not You")
+
+	if got != want {
+		t.Errorf("grammar expansion failed: got %q, want %q", got, want)
+	}
+}
+
+func TestGrammarExpansion_ApostropheForm(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	// "Don't" has apostrophe which is a separator, so it becomes "dont"
+	// then grammar expansion expands "dont" to "do not"
+	got := n.MustNormalize("You Like Me, Don't You")
+	want := "you like me do not you"
+
+	if got != want {
+		t.Errorf("apostrophe grammar expansion: got %q, want %q", got, want)
+	}
+}
+
+func TestGrammarExpansion_MultipleContractions(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	got := n.MustNormalize("I Cant Believe Its Not Butter")
+	want := "i can not believe it is not butter"
+
+	if got != want {
+		t.Errorf("multiple contractions: got %q, want %q", got, want)
+	}
+}
+
+func TestGrammarExpansion_Youre(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	got := n.MustNormalize("Youre Under My Skin")
+	want := "you are under my skin"
+
+	if got != want {
+		t.Errorf("youre expansion: got %q, want %q", got, want)
+	}
+}
+
+func TestGrammarExpansion_NoMatch(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	got := n.MustNormalize("One Piece")
+	want := "one piece"
+
+	if got != want {
+		t.Errorf("no grammar match: got %q, want %q", got, want)
+	}
+}
+
+func TestGrammarExpansion_Extensibility(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	// Add a custom rule
+	normalize.GrammarRules["gonna"] = "going to"
+	defer delete(normalize.GrammarRules, "gonna")
+
+	got := n.MustNormalize("I Gonna Go")
+	want := "i going to go"
+
+	if got != want {
+		t.Errorf("extensibility: got %q, want %q", got, want)
+	}
+}
+
+func TestGrammarExpansion_Idempotent(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	a := n.MustNormalize("You Like Me, Dont You")
+	b := n.MustNormalize("You Like Me, Dont You")
+
+	if a != b {
+		t.Errorf("grammar expansion not idempotent: %q != %q", a, b)
+	}
+}
