@@ -220,12 +220,12 @@ func TestNormalizeAllTitles(t *testing.T) {
 		SourceID: "na1",
 	})
 
-	updated, err := p.NormalizeAllTitles()
+	stats, err := p.NormalizeAllTitles()
 	if err != nil {
 		t.Fatalf("NormalizeAllTitles: %v", err)
 	}
-	if updated != 1 {
-		t.Errorf("updated %d, want 1", updated)
+	if stats.Updated != 1 {
+		t.Errorf("updated %d, want 1", stats.Updated)
 	}
 
 	got, _ := p.DB().GetMediaBySourceID("na1")
@@ -245,12 +245,12 @@ func TestNormalizeAllTitles_Idempotent(t *testing.T) {
 
 	p.NormalizeAllTitles()
 
-	updated, err := p.NormalizeAllTitles()
+	stats, err := p.NormalizeAllTitles()
 	if err != nil {
 		t.Fatalf("NormalizeAllTitles: %v", err)
 	}
-	if updated != 0 {
-		t.Errorf("second run updated %d, want 0 (should be idempotent)", updated)
+	if stats.Updated != 0 {
+		t.Errorf("second run updated %d, want 0 (should be idempotent)", stats.Updated)
 	}
 }
 

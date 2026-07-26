@@ -545,12 +545,12 @@ func (p *Pipeline) BatchLookupStream(mediaType database.MediaType, titles []stri
 			cands := make([]Candidate, len(candidates))
 			for i, fc := range candidates {
 				cands[i] = Candidate{
-					Title:     fc.Title,
-					SourceID:  fc.Media.SourceID,
-					Language:  fc.Media.Language,
-					URL:       fc.Media.URL,
-					Status:    fc.Media.Status,
-					DescEn:    fc.Media.Description,
+					Title:    fc.Title,
+					SourceID: fc.Media.SourceID,
+					Language: fc.Media.Language,
+					URL:      fc.Media.URL,
+					Status:   fc.Media.Status,
+					DescEn:   fc.Media.Description,
 				}
 			}
 			ch <- LookupResult{Source: SourceFuzzy, Query: title, Candidates: cands}
@@ -624,8 +624,8 @@ type FuzzyCandidate struct {
 
 // FuzzyLookupResult is the result of a local fuzzy scan.
 type FuzzyLookupResult struct {
-	Exact     *database.Media   // exact index match (preferred)
-	Fuzzy     []FuzzyCandidate  // candidates above fuzzy threshold
+	Exact     *database.Media  // exact index match (preferred)
+	Fuzzy     []FuzzyCandidate // candidates above fuzzy threshold
 	Query     string
 	QueryNorm string
 }
@@ -694,35 +694,44 @@ func (p *Pipeline) LinkQuery(mediaType database.MediaType, mediaID int64, query 
 	return p.db.IndexTitles(mediaType, mediaID, index)
 }
 
+// NormalizeStats holds the result of a normalisation pass.
+type NormalizeStats struct {
+	Updated int64 // records whose title/alt_title column changed
+	Indexed int64 // records re-indexed in the title index
+}
+
 // NormalizeAllTitles re-normalises every title across all media types and
 // rebuilds the title index. Safe to run repeatedly (idempotent).
-func (p *Pipeline) NormalizeAllTitles() (int64, error) {
-	var totalUpdated int64
+func (p *Pipeline) NormalizeAllTitles() (NormalizeStats, error) {
+	var stats NormalizeStats
 
 	for _, mt := range database.AllMediaTypes() {
-		updated, err := p.normalizeTitlesForType(mt)
+		updated, indexed, err := p.normalizeTitlesForType(mt)
 		if err != nil {
-			return totalUpdated, err
+			return stats, err
 		}
-		totalUpdated += updated
+		stats.Updated += updated
+		stats.Indexed += indexed
 	}
 
-	return totalUpdated, nil
+	return stats, nil
 }
 
 // normalizeTitlesForType re-normalises titles and rebuilds the index for one media type.
-func (p *Pipeline) normalizeTitlesForType(mediaType database.MediaType) (int64, error) {
+// Returns (updated, indexed, error) where updated is records whose title changed
+// and indexed is the total records re-indexed.
+func (p *Pipeline) normalizeTitlesForType(mediaType database.MediaType) (int64, int64, error) {
 	all, err := p.db.AllMedia(mediaType)
 	if err != nil {
-		return 0, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("fetch all %s", mediaType.TableName()), Err: err}
+		return 0, 0, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("fetch all %s", mediaType.TableName()), Err: err}
 	}
 
 	// Clear the index for this media type — we'll rebuild as we go
 	if err := p.db.RebuildTitleIndex(mediaType); err != nil {
-		return 0, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("rebuild index for %s", mediaType.TableName()), Err: err}
+		return 0, 0, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("rebuild index for %s", mediaType.TableName()), Err: err}
 	}
 
-	var updated int64
+	var updated, indexed int64
 	for i := range all {
 		newTitle := normalize.FoldUnicode(all[i].Title)
 		newAlt := normalize.NormalizeAllTitlesJSON(all[i].AltTitle)
@@ -730,22 +739,24 @@ func (p *Pipeline) normalizeTitlesForType(mediaType database.MediaType) (int64, 
 		if newTitle == all[i].Title && newAlt == all[i].AltTitle {
 			// Title unchanged, but still index it
 			if err := p.reindexMedia(mediaType, all[i].ID, &all[i]); err != nil {
-				return updated, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("reindex %s %d", mediaType.TableName(), all[i].ID), Err: err}
+				return updated, indexed, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("reindex %s %d", mediaType.TableName(), all[i].ID), Err: err}
 			}
+			indexed++
 			continue
 		}
 
 		all[i].Title = newTitle
 		all[i].AltTitle = newAlt
 		if err := p.db.UpdateMedia(&all[i]); err != nil {
-			return updated, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("update %s %d", mediaType.TableName(), all[i].ID), Err: err}
+			return updated, indexed, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("update %s %d", mediaType.TableName(), all[i].ID), Err: err}
 		}
 		if err := p.reindexMedia(mediaType, all[i].ID, &all[i]); err != nil {
-			return updated, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("reindex %s %d", mediaType.TableName(), all[i].ID), Err: err}
+			return updated, indexed, &PipelineError{Kind: ErrDatabase, Message: fmt.Sprintf("reindex %s %d", mediaType.TableName(), all[i].ID), Err: err}
 		}
 		updated++
+		indexed++
 	}
-	return updated, nil
+	return updated, indexed, nil
 }
 
 // QueryForAPI normalises a title for use as a MangaDex API search query.
