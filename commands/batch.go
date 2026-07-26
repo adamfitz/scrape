@@ -94,8 +94,10 @@ func runBatch(cmd *cobra.Command, args []string) error {
 		if !batchJSON {
 			if result.Error != "" {
 				fmt.Printf("[%d/%d] [%s] %s — %s\n", i, len(unique), result.Source, result.Query, result.Error)
-			} else {
+			} else if result.Media != nil {
 				fmt.Printf("[%d/%d] [%s] %s\n", i, len(unique), result.Source, result.Media.Title)
+			} else {
+				fmt.Printf("[%d/%d] [%s] [fuzzy multiple] %s\n", i, len(unique), result.Source, result.Query)
 			}
 		}
 
