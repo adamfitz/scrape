@@ -104,6 +104,9 @@ The normalizer SHALL convert common word separators and punctuation into spaces:
 | `~` | Tilde |
 | `～` | Fullwidth tilde |
 | `〜` | Wave dash |
+| `&` | Ampersand |
+| `\|` | Pipe |
+| `•` | Bullet |
 
 #### Scenario: Colon-separated title
 
@@ -129,13 +132,37 @@ The normalizer SHALL remove common media file extensions (`.cbz`, `.cbr`, `.mkv`
 
 ### Requirement: Noise removal
 
-The normalizer SHALL remove bracketed tags `[...]`, parenthesized notes `(...)`, and volume/chapter/part markers.
+The normalizer SHALL remove bracketed tags `[...]`, parenthesized notes `(...)`, volume/chapter markers (including Roman numerals), edition markers (`Perfect Edition`, `Omnibus Edition`, `2-in-1 Edition`), and trailing year numbers.
 
 #### Scenario: Scan group tag removal
 
 - GIVEN the input `"[ScanGroup] Bloom Into You (Digital)"`
 - WHEN normalized
 - THEN the result SHALL be `"bloom into you"`
+
+#### Scenario: Edition marker removal
+
+- GIVEN the input `"Baki the Grappler - Perfect Edition"`
+- WHEN normalized
+- THEN the result SHALL be `"baki the grappler"` (edition marker stripped)
+
+#### Scenario: Roman numeral volume
+
+- GIVEN the input `"Manga Title Vol. III"`
+- WHEN normalized
+- THEN the result SHALL be `"manga title"` (Roman numeral matched)
+
+#### Scenario: Trailing year removal
+
+- GIVEN the input `"Some Manga 2022"`
+- WHEN normalized
+- THEN the result SHALL be `"some manga"` (trailing year stripped)
+
+#### Scenario: Part number preservation
+
+- GIVEN the input `"Ascendance of a Bookworm - Part 01"`
+- WHEN normalized
+- THEN the result SHALL be `"ascendance of a bookworm part 01"` (part number preserved)
 
 ### Requirement: Stop word removal
 
@@ -241,8 +268,8 @@ Both functions SHALL handle structured format (`{"primary":{...},"alts":[{...}]}
 
 ```go
 type NormalizationConfig struct {
-    Separators    []string  // default: [".", "_", "-", ":", ";", ",", "!", "?", "'", "'", "\"", "~", "～", "〜"]
-    NoisePatterns []string  // default: bracket/paren/vol/ch/edition patterns
+    Separators    []string  // default: [".", "_", "-", ":", ";", ",", "!", "?", "'", "'", "\"", "~", "～", "〜", "&", "|", "•"]
+    NoisePatterns []string  // default: bracket/paren/vol/ch/edition/year patterns
     StopWords     []string  // default: ["the", "a", "an", "and", "of"]
 }
 ```

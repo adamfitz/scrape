@@ -42,15 +42,18 @@ func New(config NormalizationConfig) *Normalizer {
 // normalizeConfig applies default rules when slices are nil/empty.
 func normalizeConfig(c NormalizationConfig) NormalizationConfig {
 	if len(c.Separators) == 0 {
-		c.Separators = []string{".", "_", "-", ":", ";", ",", "!", "?", "'", "'", "\"", "~", "～", "〜"}
+		c.Separators = []string{".", "_", "-", ":", ";", ",", "!", "?", "'", "'", "\"", "~", "～", "〜", "&", "|", "•"}
 	}
 	if len(c.NoisePatterns) == 0 {
 		c.NoisePatterns = []string{
 			`\[.*?\]`,
 			`\(.*?\)`,
-			`\s(v|vol)\.?\s*\d+`,
-			`\s(ch|ch\.|chapter)\s*\d+`,
-			`\s(part|pt)\.?\s*\d+`,
+			`\s(v|vol)\.?\s*(\d+|[ivxlcdm]+)`,
+			`\s(ch|ch\.|chapter)\s*(\d+|[ivxlcdm]+)`,
+			`\sPerfect Edition`,
+			`\sOmnibus Edition`,
+			`\s2-in-1 Edition`,
+			`\s\d{4}$`,
 		}
 	}
 	if len(c.StopWords) == 0 {

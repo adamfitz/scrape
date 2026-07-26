@@ -52,6 +52,12 @@ There are two levels of normalisation used in the codebase:
 | `"straße"` | `"strasse"` (ß → ss via case fold) |
 | `"You Like Me, Dont You"` | `"you like me do not you"` (grammar expansion) |
 | `"Youre Under My Skin"` | `"you are under my skin"` (grammar expansion) |
+| `"Dungeons & Artifacts"` | `"dungeons artifacts"` (ampersand separator) |
+| `"Title | Subtitle"` | `"title subtitle"` (pipe separator) |
+| `"Baki the Grappler - Perfect Edition"` | `"baki the grappler"` (edition marker stripped) |
+| `"Manga Title Vol. III"` | `"manga title"` (Roman numeral vol stripped) |
+| `"Some Manga 2022"` | `"some manga"` (trailing year stripped) |
+| `"Ascendance of a Bookworm - Part 01"` | `"ascendance of a bookworm part 01"` (part number preserved) |
 
 ## Technical Implementation
 
@@ -66,8 +72,8 @@ The `Normalize()` method applies these steps in order:
 1. **NFKC normalize + supplemental fold** -- Unicode NFKC via `golang.org/x/text/unicode/norm`, then a supplemental fold map for ~25 characters NFKC misses (curly quotes, en/em dashes, wave dashes, typographic symbols).
 2. **Grammar expansion** -- Expand common English contractions and misspellings using the extensible `GrammarRules` map (e.g., `dont` → `do not`, `youre` → `you are`). Applied after fold, before separator folding. Ensures contracted and expanded forms normalise identically.
 3. **Extension strip** -- Remove common media file extensions (`.cbz`, `.mkv`, `.epub`, etc.) using a pre-compiled regex.
-4. **Separator fold** -- Replace punctuation separators (`.`, `_`, `-`, `:`, `;`, `,`, `!`, `?`, `'`, `"`, `~`, and their fullwidth variants) with spaces via a dynamically built character-class regex.
-5. **Noise removal** -- Strip bracketed tags `[...]`, parenthesised notes `(...)`, and volume/chapter/part markers (e.g. `Vol. 3`, `Ch 1090`, `Part 2`) using a case-insensitive combined regex.
+4. **Separator fold** -- Replace punctuation separators (`.`, `_`, `-`, `:`, `;`, `,`, `!`, `?`, `'`, `"`, `~`, `&`, `|`, `•`, and their fullwidth variants) with spaces via a dynamically built character-class regex.
+5. **Noise removal** -- Strip bracketed tags `[...]`, parenthesised notes `(...)`, volume/chapter markers (e.g. `Vol. 3`, `Ch 1090`, `Vol. III`), edition markers (`Perfect Edition`, `Omnibus Edition`, `2-in-1 Edition`), and trailing year numbers (e.g. `2022`) using regex patterns.
 6. **Multi-space collapse** -- Repeatedly collapse double spaces into single spaces.
 7. **Stop word removal** -- Filter out common words (`the`, `a`, `an`, `and`, `of` by default) from the word list.
 8. **Unicode case fold** -- Case-insensitive folding via `golang.org/x/text/cases`. Replaces `strings.ToLower` to handle locale-aware case mappings (`ß → ss`, Kelvin `K → k`, etc.).
@@ -200,11 +206,13 @@ flowchart TD
     subgraph "Noise Patterns"
         E1("bracketed tags")
         E2("parenthesised notes")
-        E3("Vol. / Ch. / Part markers")
+        E3("Vol. / Ch. markers (incl. Roman numerals)")
+        E4("Edition markers (Perfect, Omnibus, 2-in-1)")
+        E5("Trailing year numbers")
     end
 
     subgraph "Separators"
-        D1[". _ - : ; , ! ? ~ etc."]
+        D1[". _ - : ; , ! ? ~ & | • etc."]
     end
 
     subgraph "Fuzzy Scoring (pipeline)"

@@ -475,3 +475,190 @@ func TestGrammarExpansion_Idempotent(t *testing.T) {
 		t.Errorf("grammar expansion not idempotent: %q != %q", a, b)
 	}
 }
+
+func TestNormalize_Idempotency(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+	inputs := []string{
+		"Chainsaw.Man",
+		"[ScanGroup] Bloom Into You (Digital)",
+		"The Jack-of-all-trades Kicked Out of the Hero\u2019s Party ~ The Swordsman Who Became a Support Mage Due to Party Circumstances, Becomes All Powerful",
+		"You Like Me, Dont You",
+		"ＳＡＯ",
+		"鬼滅の刃",
+	}
+
+	for _, input := range inputs {
+		a := n.MustNormalize(input)
+		b := n.MustNormalize(input)
+		if a != b {
+			t.Errorf("not idempotent for %q: %q != %q", input, a, b)
+		}
+	}
+}
+
+func TestNormalize_Transitivity(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+	inputs := []string{
+		"Chainsaw.Man",
+		"[ScanGroup] Bloom Into You (Digital)",
+		"You Like Me, Dont You",
+		"Hero\u2019s Party ~ Swordsman",
+		"ＳＡＯ",
+	}
+
+	for _, input := range inputs {
+		once := n.MustNormalize(input)
+		twice := n.MustNormalize(once)
+		if once != twice {
+			t.Errorf("not transitive for %q: once=%q, twice=%q", input, once, twice)
+		}
+	}
+}
+
+func TestNormalize_NestedBrackets(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	// Nested brackets: [A] [B] Title
+	got := n.MustNormalize("[ScanGroup] [v2] Bloom Into You")
+	want := n.MustNormalize("Bloom Into You")
+	if got != want {
+		t.Errorf("nested brackets: got %q, want %q", got, want)
+	}
+
+	// Nested parentheses: non-greedy regex matches first pair, trailing ) remains
+	got2 := n.MustNormalize("Title (foo (bar))")
+	want2 := n.MustNormalize("Title )")
+	if got2 != want2 {
+		t.Errorf("nested parentheses: got %q, want %q", got2, want2)
+	}
+}
+
+func TestNormalize_AmpersandSeparator(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	a := n.MustNormalize("Dungeons & Artifacts")
+	b := n.MustNormalize("Dungeons Artifacts")
+
+	if a != b {
+		t.Errorf("ampersand not folded: %q != %q", a, b)
+	}
+}
+
+func TestNormalize_PipeSeparator(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	a := n.MustNormalize("Title | Subtitle")
+	b := n.MustNormalize("Title Subtitle")
+
+	if a != b {
+		t.Errorf("pipe not folded: %q != %q", a, b)
+	}
+}
+
+func TestNormalize_BulletSeparator(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	a := n.MustNormalize("Title \u2022 Subtitle")
+	b := n.MustNormalize("Title Subtitle")
+
+	if a != b {
+		t.Errorf("bullet not folded: %q != %q", a, b)
+	}
+}
+
+func TestNormalize_EditionMarker_PerfectEdition(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	got := n.MustNormalize("Baki the Grappler - Perfect Edition")
+	want := n.MustNormalize("Baki the Grappler")
+
+	if got != want {
+		t.Errorf("Perfect Edition not stripped: got %q, want %q", got, want)
+	}
+}
+
+func TestNormalize_EditionMarker_OmnibusEdition(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	// Parenthesized form is already stripped by \(.*?\)
+	got := n.MustNormalize("Initial D (Omnibus Edition)")
+	want := n.MustNormalize("Initial D")
+
+	if got != want {
+		t.Errorf("Omnibus Edition not stripped: got %q, want %q", got, want)
+	}
+}
+
+func TestNormalize_EditionMarker_TwoInOne(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	// Parenthesized form is already stripped by \(.*?\)
+	got := n.MustNormalize("Maid-sama! (2-in-1 Edition)")
+	want := n.MustNormalize("Maid-sama!")
+
+	if got != want {
+		t.Errorf("2-in-1 Edition not stripped: got %q, want %q", got, want)
+	}
+}
+
+func TestNormalize_BareTrailingYear(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	// Year at end of string is stripped
+	got := n.MustNormalize("Some Manga 2022")
+	want := n.MustNormalize("Some Manga")
+
+	if got != want {
+		t.Errorf("bare trailing year not stripped: got %q, want %q", got, want)
+	}
+
+	// Year in middle is NOT stripped (only trailing years)
+	got2 := n.MustNormalize("Some Manga 2022 Uncensored")
+	want2 := n.MustNormalize("Some Manga 2022 Uncensored")
+
+	if got2 != want2 {
+		t.Errorf("mid-string year should be preserved: got %q, want %q", got2, want2)
+	}
+}
+
+func TestNormalize_RomanNumeralVol(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	got := n.MustNormalize("Manga Title Vol. III")
+	want := n.MustNormalize("Manga Title")
+
+	if got != want {
+		t.Errorf("Roman numeral vol not stripped: got %q, want %q", got, want)
+	}
+}
+
+func TestNormalize_PartNumberPreserved(t *testing.T) {
+	n := normalize.New(normalize.NormalizationConfig{})
+
+	a := n.MustNormalize("Ascendance of a Bookworm - Part 01")
+	b := n.MustNormalize("Ascendance of a Bookworm - Part 02")
+
+	if a == b {
+		t.Errorf("part numbers should be preserved but got same result: %q", a)
+	}
+}
+
+func TestNormalizeAltTitlesJSON_Idempotent(t *testing.T) {
+	raw := `{"primary":{"en":"The Hero\u2019s Party","ja":"勇者パーティー"},"alts":[{"ja":"勇者パーティ","en":"Hero\u2019s Party"}]}`
+	a := normalize.NormalizeAltTitlesJSON(raw)
+	b := normalize.NormalizeAltTitlesJSON(raw)
+
+	if a != b {
+		t.Errorf("NormalizeAltTitlesJSON not idempotent: %q != %q", a, b)
+	}
+}
+
+func TestNormalizeAllTitlesJSON_Idempotent(t *testing.T) {
+	raw := `{"primary":{"en":"The Hero\u2019s Party","ja":"勇者パーティー"},"alts":[{"ja":"勇者パーティ","en":"Hero\u2019s Party"}]}`
+	a := normalize.NormalizeAllTitlesJSON(raw)
+	b := normalize.NormalizeAllTitlesJSON(raw)
+
+	if a != b {
+		t.Errorf("NormalizeAllTitlesJSON not idempotent: %q != %q", a, b)
+	}
+}
