@@ -82,16 +82,14 @@ The `Normalize()` method applies these steps in order:
 
 NFKC (Unicode Normalization Form KC) is the foundation of the fold step. It is the recommended normalization form for this codebase because:
 
-- **Standards-compliant**: Covers all compatibility equivalents in Unicode (thousands of characters vs ~90 hand-picked entries).
+- **Standards-compliant**: Covers all compatibility equivalents in Unicode (thousands of characters).
 - **Hangul-safe**: Unlike NFKD, NFKC does not decompose Hangul syllables into Jamo.
 - **Idempotent by definition**: Applying NFKC multiple times produces the same result.
-- **Handles cases the manual table missed**: Ligatures (`ﬁ` → `fi`), superscripts (`²` → `2`), mathematical symbols, and any future Unicode additions.
+- **Handles ligatures, superscripts, and more**: Ligatures (`ﬁ` → `fi`), superscripts (`²` → `2`), mathematical symbols, and any future Unicode additions.
 
 However, NFKC only handles **compatibility equivalents** (fullwidth → ASCII, ligatures → expanded, etc.). It does NOT handle **semantically similar characters** like curly quotes (`'` → `'`), en/em dashes (`–` → `-`), wave dashes (`〜` → `~`), or typographic symbols (`©` → `(`). These are common in manga titles and require a supplemental fold map.
 
 The `FoldUnicode` function applies NFKC first, then the supplemental map for ~25 characters that NFKC misses. `NFKC()` is also exported for callers that need raw NFKC without the supplemental fold.
-
-The previous manual `unicodeFold` map and `init()` function are removed entirely.
 
 ### Alt Titles JSON Functions
 

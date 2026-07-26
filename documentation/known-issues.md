@@ -28,10 +28,10 @@ Consolidated analysis of shortcomings in `internal/normalize/normalize.go`, the 
   - [#17 — No Idempotency Tests for JSON](#17-no-idempotency-tests-for-json-functions)
   - [#18 — No Transitivity Test](#18-no-transitivity-test-for-normalize)
   - [#19 — Weak AccentPreserved Test](#19-accentpreserved-test-is-weak)
-  - [#20 — No NFKC Equivalence Test](#20-no-nfkc-equivalence-test)
-  - [#21 — No Cross-Script Equivalence Test](#21-no-cross-script-equivalence-test)
-  - [#22 — test_list.txt Duplicate Entry](#22-test_listtxt-duplicate-entry)
-  - [#23 — No test_list.txt Full Run Against Expected](#23-no-test_listtxt-full-run-against-expected)
+  - [#20 — No Nested Bracket Tests](#20-no-nested-bracket--parenthesis-tests)
+  - [#21 — No Edition Marker Tests](#21-no-test-for-edition-markers)
+  - [#22 — No & / | Tests](#22-no-test-for--or--characters)
+  - [#23 — test_list.txt Variant Data](#23-duplicate-entry-in-test_listtxt)
 - [Unicode Standards Reference](#unicode-standards-reference)
 - [Existing Libraries](#existing-libraries)
 
@@ -91,7 +91,7 @@ This is a design choice but means titles with meaningful parenthetical/bracketed
 
 **Resolution**: NFKC normalization + supplemental fold map replaces the manual `unicodeFold` table. NFKC handles thousands of compatibility characters (fullwidth, ligatures, etc.). The supplemental fold handles ~25 characters NFKC misses (curly quotes, en/em dashes, wave dashes, typographic symbols). `FoldUnicode()` now applies NFKC + supplemental fold. The manual `unicodeFold` map and `init()` are removed.
 
-**Remaining gap**: `&` (ampersand), `₩` (Korean won), `￥` (yen sign), `￠` (cent sign), `§` (section sign), `•` (bullet), `⁄` (fraction slash) are still not in the separator list or supplemental fold. These are handled by Issue [#4](#4--ampersand-not-in-fold-table-or-separator-list) and [#11](#11-missing-separators) as separator concerns, not fold concerns.
+**Remaining gap**: `₩` (Korean won), `￥` (yen sign), `￠` (cent sign), `§` (section sign), `⁄` (fraction slash) are not in the separator list or supplemental fold. These are rare in manga titles.
 
 ### 10. ~~No Unicode Case Folding~~ — RESOLVED
 
@@ -187,14 +187,14 @@ The current normalisation in `internal/normalize/normalize.go` is a **manually c
 
 | Aspect | Current Approach | Standard (NFKC) |
 |--------|-----------------|-----------------|
-| **Scope** | ~90 hand-picked characters in `unicodeFold` map | Covers all compatibility equivalents in Unicode (thousands of characters) |
-| **Fullwidth letters** | `Ａ`-`Ｚ`, `ａ`-`ｚ` (52 chars) | All fullwidth forms, plus halfwidth katakana, etc. |
-| **Ligatures** | Not handled | `ﬁ` → `fi`, `ﬂ` → `fl`, `ﬀ` → `ff`, etc. |
-| **Superscripts/subscripts** | Not handled | `²` → `2`, `₁` → `1`, etc. |
-| **Mathematical symbols** | Not handled | `∑` → `Σ`, `∞` → `∞`, etc. |
-| **Compatibility decomposition** | Not handled | `Ω` (Ohm sign) → `Ω` (Greek Omega), `ℬ` → `B`, etc. |
-| **Hangul safety** | Preserved (manual approach) | NFKD decomposes Hangul syllables into Jamo — this is why the codebase avoids NFKD |
-| **Case folding** | ASCII-only `strings.ToLower` | Unicode-aware case folding (`ß` → `ss`, Kelvin `K` → `k`, etc.) |
+| **Scope** | NFKC + supplemental fold (~25 chars NFKC misses) | Covers all compatibility equivalents in Unicode (thousands of characters) |
+| **Fullwidth letters** | Handled by NFKC | All fullwidth forms, plus halfwidth katakana, etc. |
+| **Ligatures** | Handled by NFKC | `ﬁ` → `fi`, `ﬂ` → `fl`, `ﬀ` → `ff`, etc. |
+| **Superscripts/subscripts** | Handled by NFKC | `²` → `2`, `₁` → `1`, etc. |
+| **Mathematical symbols** | Handled by NFKC | `∑` → `Σ`, `∞` → `∞`, etc. |
+| **Compatibility decomposition** | Handled by NFKC | `Ω` (Ohm sign) → `Ω` (Greek Omega), `ℬ` → `B`, etc. |
+| **Hangul safety** | Preserved (NFKC does not decompose Hangul) | NFKD decomposes Hangul syllables into Jamo — this is why the codebase uses NFKC |
+| **Case folding** | Unicode-aware via `cases.Fold()` | Unicode-aware case folding (`ß` → `ss`, Kelvin `K` → `k`, etc.) |
 
 **Recommendation**: Use Go's `golang.org/x/text/unicode/norm` package for NFKC normalization as a baseline, then layer custom rules (noise removal, separator folding, stop words) on top. This replaces the manual fold table with a standards-compliant foundation.
 
@@ -205,7 +205,7 @@ The current normalisation in `internal/normalize/normalize.go` is a **manually c
 | **Cross-script confusables** | Not handled | Cyrillic `а` (U+0430) ≈ Latin `a` (U+0061), Greek `ο` (U+03BF) ≈ Latin `o`, etc. |
 | **Mixed-script detection** | Not handled | Flags input mixing Latin + Cyrillic + Greek, etc. (almost always an attack or error) |
 | **Skeleton algorithm** | Not implemented | Produces a canonical "visual skeleton" for any string, enabling comparison across scripts |
-| **Data source** | Manual mapping | `confusables.txt` — maintained by the Unicode Consortium, ~1,400 pairs |
+| **Data source** | NFKC + supplemental fold (~25 chars) | `confusables.txt` — maintained by the Unicode Consortium, ~1,400 pairs |
 | **Scope** | Characters that look like ASCII | Characters that look like *each other* across all scripts |
 
 **Note**: Cross-script confusables are less relevant for manga title matching (titles are typically in one script), but are critical if the system ever handles user-generated identifiers, URLs, or cross-language search.
@@ -218,7 +218,7 @@ The TR39 skeleton algorithm uses **NFD** decomposition, not NFKC. This matters b
 - TR39 maps `ſ` → `f` (visually similar to `f`, not `s`)
 - If you run NFKC first, the TR39 entry for `ſ` becomes unreachable dead code
 
-**For this codebase**: NFKC is the right baseline (we want `ſ` → `s`, not `ſ` → `f`). The custom fold table is essentially a partial NFKC implementation. A full NFKC pass would subsume most of the fold table.
+**For this codebase**: NFKC is the right baseline (we want `ſ` → `s`, not `ſ` → `f`). The codebase uses NFKC directly via `golang.org/x/text/unicode/norm`, with a supplemental fold for ~25 characters NFKC misses (curly quotes, dashes, wave dashes, typographic symbols).
 
 ### Reference Data Files
 
@@ -264,8 +264,8 @@ Raw title
   → Supplemental fold        (curly quotes, dashes, wave dashes)
   → Grammar expansion        (GrammarRules map: dont → do not, etc.)
   → Strip file extensions    (custom regex, as now)
-  → Fold separators          (custom regex, as now — but with expanded set)
-  → Remove noise             (custom regex, as now — but with edition markers)
+  → Fold separators          (custom regex — . _ - : ; , ! ? ~ & | • etc.)
+  → Remove noise             (custom regex — brackets, parens, vol/ch, editions, trailing years)
   → Collapse whitespace      (custom, as now)
   → Remove stop words        (custom, as now)
   → Unicode case fold        (golang.org/x/text/cases — replaces strings.ToLower)
