@@ -259,7 +259,7 @@ Each batch result line SHALL indicate the matching strategy used:
 |-----------|---------|
 | `[db]` | Exact match via title_index (tier 1) |
 | `[fuzzy]` | Single fuzzy match — auto-linked via LinkQuery (tier 2) |
-| `[fuzzy] [fuzzy multiple]` | Multiple fuzzy candidates — requires disambiguation |
+| `[fuzzy] [fuzzy multiple]` | Multiple fuzzy candidates — requires disambiguation via `scrape lookup` |
 | `[api]` | Match via MangaDex API |
 
 ### Requirement: Configurable threshold

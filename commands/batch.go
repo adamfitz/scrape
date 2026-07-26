@@ -138,11 +138,11 @@ func runBatch(cmd *cobra.Command, args []string) error {
 
 	totalFound := cachedCount + fuzzyFound + apiFound
 
-	fmt.Printf("\n---\n%d processed — %d found (DB: %d, Fuzzy: %d, API: %d), %d ambiguous, %d not found\n",
+	fmt.Printf("\n---\n%d processed — %d found (DB: %d, Fuzzy: %d, API: %d), %d fuzzy (multiple), %d not found\n",
 		len(unique), totalFound, cachedCount, fuzzyFound, apiFound, fuzzyMultiple, notFound)
 
 	if fuzzyMultiple > 0 {
-		fmt.Printf("  → Ambiguous: run `scrape lookup \"<title>\"` for each to disambiguate\n")
+		fmt.Printf("  → Fuzzy (multiple): run `scrape lookup \"<title>\"` for each to disambiguate\n")
 	}
 	if notFound > 0 {
 		fmt.Printf("  → Not found: not on MangaDex — check manually or skip\n")

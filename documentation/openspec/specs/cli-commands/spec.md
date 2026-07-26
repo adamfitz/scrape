@@ -54,8 +54,8 @@ Format: `[source] Title`
 
 ```
 ---
-713 processed — 630 found (DB: 600, Fuzzy: 30, API: 0), 11 ambiguous, 47 not found
-  → Ambiguous: run `scrape lookup "<title>"` for each to disambiguate
+713 processed — 630 found (DB: 600, Fuzzy: 30, API: 0), 11 fuzzy (multiple), 47 not found
+  → Fuzzy (multiple): run `scrape lookup "<title>"` for each to disambiguate
   → Not found: not on MangaDex — check manually or skip
 ---
 ```

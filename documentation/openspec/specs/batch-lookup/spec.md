@@ -89,8 +89,8 @@ After processing, a summary line SHALL be displayed:
 
 ```
 ---
-713 processed — 630 found (DB: 600, Fuzzy: 30, API: 0), 11 ambiguous, 47 not found
-  → Ambiguous: run `scrape lookup "<title>"` for each to disambiguate
+713 processed — 630 found (DB: 600, Fuzzy: 30, API: 0), 11 fuzzy (multiple), 47 not found
+  → Fuzzy (multiple): run `scrape lookup "<title>"` for each to disambiguate
   → Not found: not on MangaDex — check manually or skip
 ---
 ```
@@ -98,7 +98,7 @@ After processing, a summary line SHALL be displayed:
 - `DB` = exact match via title_index
 - `Fuzzy` = single fuzzy match auto-linked via `LinkQuery` (reuses existing record)
 - `API` = found and ingested from MangaDex
-- `ambiguous` = multiple fuzzy candidates — user must disambiguate via `scrape lookup`
+- `fuzzy (multiple)` = multiple fuzzy candidates — user must disambiguate via `scrape lookup`
 - `not found` = not found in DB or MangaDex
 
 Actionable hints SHALL be printed when ambiguous or not-found counts are > 0.
