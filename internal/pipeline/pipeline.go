@@ -159,12 +159,12 @@ func (p *Pipeline) ensureTitleIndex() {
 	}
 }
 
-// DB returns the pipeline's database connection.
+// DB returns the pipeline's underlying database connection.
 func (p *Pipeline) DB() *database.DB {
 	return p.db
 }
 
-// Normalizer returns the pipeline's normaliser instance.
+// Normalizer returns the pipeline's normaliser instance for external callers.
 func (p *Pipeline) Normalizer() *normalize.Normalizer {
 	return p.normaliser
 }
@@ -191,6 +191,7 @@ func ParseAltTitles(raw string) AltTitleData {
 	return parseAltTitles(raw)
 }
 
+// allTitles returns the primary title plus all alt titles for a media record.
 func allTitles(m *database.Media) []string {
 	titles := []string{m.Title}
 	if m.AltTitle == "" {
@@ -212,6 +213,7 @@ func allTitles(m *database.Media) []string {
 	return titles
 }
 
+// normalizeAllTitles applies FoldUnicode to the title and alt_title for storage.
 func normalizeAllTitles(m *database.Media) (string, string) {
 	norm := normalize.FoldUnicode(m.Title)
 	altNorm := normalize.NormalizeAllTitlesJSON(m.AltTitle)
@@ -293,6 +295,7 @@ func queryMatchesAnyTitle(normalizedQuery string, result mangadex.MangaResult, n
 	return false
 }
 
+// extractTitles pulls primary and alt titles from a MangaDex API result.
 func extractTitles(r mangadex.MangaResult) AltTitleData {
 	return AltTitleData{
 		Primary: r.Attributes.Title,
@@ -300,6 +303,7 @@ func extractTitles(r mangadex.MangaResult) AltTitleData {
 	}
 }
 
+// extractCandidate wraps a MangaDex result into a Candidate for user disambiguation.
 func extractCandidate(r mangadex.MangaResult, query string) Candidate {
 	titles := extractTitles(r)
 	b, _ := json.Marshal(titles)
@@ -315,6 +319,7 @@ func extractCandidate(r mangadex.MangaResult, query string) Candidate {
 	}
 }
 
+// ingestResult converts a MangaDex API result into a Media record and stores it.
 func (p *Pipeline) ingestResult(mediaType database.MediaType, query string, r mangadex.MangaResult) (*LookupResult, error) {
 	titles := extractTitles(r)
 	b, _ := json.Marshal(titles)
@@ -689,8 +694,8 @@ func (p *Pipeline) LinkQuery(mediaType database.MediaType, mediaID int64, query 
 	return p.db.IndexTitles(mediaType, mediaID, index)
 }
 
-// NormalizeAllTitles re-normalises every title and alt_title across all
-// media tables and rebuilds the title index. Safe to run repeatedly (idempotent).
+// NormalizeAllTitles re-normalises every title across all media types and
+// rebuilds the title index. Safe to run repeatedly (idempotent).
 func (p *Pipeline) NormalizeAllTitles() (int64, error) {
 	var totalUpdated int64
 
@@ -705,6 +710,7 @@ func (p *Pipeline) NormalizeAllTitles() (int64, error) {
 	return totalUpdated, nil
 }
 
+// normalizeTitlesForType re-normalises titles and rebuilds the index for one media type.
 func (p *Pipeline) normalizeTitlesForType(mediaType database.MediaType) (int64, error) {
 	all, err := p.db.AllMedia(mediaType)
 	if err != nil {
@@ -742,7 +748,7 @@ func (p *Pipeline) normalizeTitlesForType(mediaType database.MediaType) (int64, 
 	return updated, nil
 }
 
-// QueryForAPI normalises a title for use as an API search query.
+// QueryForAPI normalises a title for use as a MangaDex API search query.
 func QueryForAPI(title string) string {
 	n := normalize.New(normalize.NormalizationConfig{})
 	q, _ := n.Normalize(title)
@@ -750,6 +756,7 @@ func QueryForAPI(title string) string {
 }
 
 // Deduplicate removes duplicate titles using normalised forms as keys.
+// Used to deduplicate input files before batch processing.
 func Deduplicate(titles []string) []string {
 	n := normalize.New(normalize.NormalizationConfig{})
 	seen := make(map[string]bool)
@@ -767,8 +774,8 @@ func Deduplicate(titles []string) []string {
 	return result
 }
 
-// TitleOrFallback returns the title in the requested language, or falls back
-// to the first available language, or the provided fallback string.
+// TitleOrFallback returns the title in the requested language, falling back
+// to the first available language or the provided fallback string.
 func TitleOrFallback(altTitleJSON, lang, fallback string) string {
 	data := parseAltTitles(altTitleJSON)
 

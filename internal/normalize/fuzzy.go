@@ -138,6 +138,7 @@ func levenshteinSimilarity(a, b string) float64 {
 	return 1.0 - float64(dist)/float64(maxLen)
 }
 
+// min3 returns the smallest of three integers.
 func min3(a, b, c int) int {
 	if a < b {
 		if a < c {

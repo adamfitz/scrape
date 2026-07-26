@@ -142,7 +142,7 @@ type AltTitleData struct {
 	Alts    []map[string]string `json:"alts"`
 }
 
-// ExtractTitles pulls the primary title and all alt titles from a manga result.
+// ExtractTitles pulls primary and alt titles from a MangaDex API result.
 func ExtractTitles(m MangaResult) AltTitleData {
 	return AltTitleData{
 		Primary: m.Attributes.Title,
@@ -150,7 +150,7 @@ func ExtractTitles(m MangaResult) AltTitleData {
 	}
 }
 
-// ExtractAuthorName finds the author name from the manga's relationships.
+// ExtractAuthorName finds the author name from a manga's relationships array.
 func ExtractAuthorName(relationships []Relationship) string {
 	for _, rel := range relationships {
 		if rel.Type == "author" {

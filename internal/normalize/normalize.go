@@ -39,6 +39,7 @@ func New(config NormalizationConfig) *Normalizer {
 	return n
 }
 
+// normalizeConfig applies default rules when slices are nil/empty.
 func normalizeConfig(c NormalizationConfig) NormalizationConfig {
 	if len(c.Separators) == 0 {
 		c.Separators = []string{".", "_", "-", ":", ";", ",", "!", "?", "'", "'", "\"", "~", "～", "〜"}
@@ -58,6 +59,7 @@ func normalizeConfig(c NormalizationConfig) NormalizationConfig {
 	return c
 }
 
+// compile builds internal regexes and stop-word set from the config.
 func (n *Normalizer) compile() {
 	// Build character class. Put - at end so it's literal, not a range.
 	var class []string

@@ -171,7 +171,7 @@ func runBatch(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// parseInputFile reads a text or CSV file and returns a list of titles.
+// parseInputFile reads a .txt or .csv file and returns a list of titles.
 func parseInputFile(path string) ([]string, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 
@@ -185,6 +185,7 @@ func parseInputFile(path string) ([]string, error) {
 	}
 }
 
+// parseTextFile reads a line-per-title text file, skipping blanks and # comments.
 func parseTextFile(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -204,6 +205,7 @@ func parseTextFile(path string) ([]string, error) {
 	return titles, scanner.Err()
 }
 
+// parseCSVFile reads the first column of a CSV file as titles, skipping the header row.
 func parseCSVFile(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {

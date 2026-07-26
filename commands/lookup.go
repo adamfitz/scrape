@@ -212,7 +212,7 @@ func printVerbose(out lookupOutput) error {
 	return nil
 }
 
-// openDB is a helper to open the database using the config path.
+// openDB opens the SQLite database at the configured path.
 func openDB() (*database.DB, error) {
 	dbPath, err := config.DBPath()
 	if err != nil {
@@ -225,7 +225,7 @@ func openDB() (*database.DB, error) {
 	return db, nil
 }
 
-// openPipeline creates a Pipeline with the configured database.
+// openPipeline creates a Pipeline backed by the configured SQLite database.
 func openPipeline() (*pipeline.Pipeline, error) {
 	db, err := openDB()
 	if err != nil {

@@ -25,6 +25,7 @@ const (
 )
 
 // AllMediaTypes returns every supported MediaType.
+// Used by pipeline and maintenance commands to iterate all tables.
 func AllMediaTypes() []MediaType {
 	return []MediaType{
 		MediaTypeManga,
@@ -36,6 +37,7 @@ func AllMediaTypes() []MediaType {
 }
 
 // TableName returns the SQLite table name for the media type.
+// Used by all database queries to target the correct table.
 func (t MediaType) TableName() string {
 	switch t {
 	case MediaTypeManga:
@@ -107,12 +109,13 @@ func (db *DB) Close() error {
 	return db.conn.Close()
 }
 
-// Path returns the database file path.
+// Path returns the database file path, used for display in stats/backup output.
 func (db *DB) Path() string {
 	return db.path
 }
 
-// EnsureSchema creates all tables if they don't exist.
+// EnsureSchema creates all tables and indexes if they don't exist.
+// Called once by Open on database creation.
 func (db *DB) EnsureSchema() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS manga (
@@ -288,6 +291,7 @@ func (db *DB) GetMediaBySourceID(id string) (*Media, error) {
 }
 
 // InsertMedia inserts a new record and returns the generated ID.
+// Used by UpsertMedia when no existing record matches the SourceID.
 func (db *DB) InsertMedia(m *Media) (int64, error) {
 	table := m.Type.TableName()
 	query := fmt.Sprintf(
@@ -356,7 +360,8 @@ func (db *DB) IntegrityCheck() (string, error) {
 	return result, err
 }
 
-// Stats returns record counts for each table.
+// Stats returns record counts for every table in the database.
+// Used by the `maintenance stats` command.
 func (db *DB) Stats() (map[string]int, error) {
 	tables := []string{"manga", "observation", "bookmarks", "anime", "lightnovel", "webnovel", "webtoons"}
 	stats := make(map[string]int, len(tables))
@@ -415,7 +420,7 @@ func (db *DB) IndexTitles(mediaType MediaType, mediaID int64, titles map[string]
 	return tx.Commit()
 }
 
-// ClearTitleIndex removes all index entries for a record.
+// ClearTitleIndex removes all index entries for a single media record.
 func (db *DB) ClearTitleIndex(mediaType MediaType, mediaID int64) error {
 	table := mediaType.TableName()
 	_, err := db.conn.Exec(
@@ -432,7 +437,8 @@ func (db *DB) RebuildTitleIndex(mediaType MediaType) error {
 	return err
 }
 
-// TitleIndexSize returns the number of entries in the title index for a media type.
+// TitleIndexSize returns the number of entries in the title index for one media type.
+// Used by ensureTitleIndex to decide whether a rebuild is needed.
 func (db *DB) TitleIndexSize(mediaType MediaType) (int, error) {
 	table := mediaType.TableName()
 	var count int
@@ -441,7 +447,7 @@ func (db *DB) TitleIndexSize(mediaType MediaType) (int, error) {
 	return count, err
 }
 
-// TitleIndexSizeTotal returns the total number of entries across all media types.
+// TitleIndexSizeTotal returns the total index entries across all media types.
 func (db *DB) TitleIndexSizeTotal() (int, error) {
 	var count int
 	err := db.conn.QueryRow(`SELECT COUNT(*) FROM title_index`).Scan(&count)
@@ -462,7 +468,7 @@ func (db *DB) QueryTitleIndex(mediaType MediaType, normalised string) (int64, er
 }
 
 // BatchQueryTitleIndex looks up multiple normalised titles in the index.
-// Returns a map of normalised title → media ID for matches.
+// Returns a map of normalised title to media ID for all matches.
 func (db *DB) BatchQueryTitleIndex(mediaType MediaType, normalised []string) (map[string]int64, error) {
 	if len(normalised) == 0 {
 		return nil, nil
