@@ -179,16 +179,16 @@ flowchart TD
     H --> I[Canonical Form]
 
     subgraph "NFKC Normalization"
-        B1a['Fullwidth → ASCII']
-        B1b['Ligatures → expanded']
-        B1c['Compatibility variants → canonical']
+        B1a["Fullwidth → ASCII"]
+        B1b["Ligatures → expanded"]
+        B1c["Compatibility variants → canonical"]
     end
 
     subgraph "Supplemental Fold"
-        B2a['Curly quotes → ASCII']
-        B2b['En/em dashes → hyphen']
-        B2c['Wave dash → tilde']
-        B2d['© ® ° × ÷ → ASCII']
+        B2a["Curly quotes → ASCII"]
+        B2b["En/em dashes → hyphen"]
+        B2c["Wave dash → tilde"]
+        B2d["© ® ° × ÷ → ASCII"]
     end
 
     subgraph "Grammar Expansion"
@@ -198,19 +198,19 @@ flowchart TD
     end
 
     subgraph "Noise Patterns"
-        E1('bracketed tags')
-        E2('parenthesised notes')
-        E3('Vol. / Ch. / Part markers')
+        E1("bracketed tags")
+        E2("parenthesised notes")
+        E3("Vol. / Ch. / Part markers")
     end
 
     subgraph "Separators"
-        D1['. _ - : ; , ! ? ~ etc.']
+        D1[". _ - : ; , ! ? ~ etc."]
     end
 
     subgraph "Fuzzy Scoring (pipeline)"
-        F1['Token Jaccard (word overlap)']
-        F2['Levenshtein (edit distance)']
-        F3['max(jaccard, levenshtein)']
+        F1["Token Jaccard (word overlap)"]
+        F2["Levenshtein (edit distance)"]
+        F3["max(jaccard, levenshtein)"]
     end
 
     style A fill:#f9f,stroke:#333
