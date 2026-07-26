@@ -4,13 +4,12 @@ A CLI tool for looking up manga, manhwa, light novels, and other media via the [
 
 ## Features
 
-- **Single title lookup** — query MangaDex by name, get multi-language title variants (English, Japanese, Japanese Hepburn, Korean, Chinese)
-- **Batch lookup** — process hundreds of titles from text or CSV files
-- **Local-first** — checks the local database before making any API calls; only missing titles hit the API
-- **Fuzzy matching** — optional Sorensen-Dice similarity for approximate title matching (typo tolerance)
+- **Local-first** — checks the local database before making any API calls
+- **Fuzzy matching** — built-in similarity scoring (Levenshtein + token Jaccard) with 36 grammar expansion rules
+- **Title normalization** — Unicode folding, grammar expansion, separator handling, noise removal
+- **Batch processing** — process hundreds of titles from text or CSV files with progress display
 - **Rate limiting** — respects MangaDex's 5 req/s limit (default 4 req/s with headroom)
-- **Pure Go** — no CGO, no system SQLite dependency, cross-compiles to Linux, Windows, and macOS
-- **Extensible schema** — manga, anime, light novels, web novels, webtoons, bookmarks, and reading observations
+- **Pure Go** — no CGO, no system SQLite dependency
 
 ## Installation
 
@@ -28,35 +27,23 @@ go build -o scrape .
 
 ## Usage
 
-### Look up a single manga
+### Single title lookup
 
 ```bash
 scrape lookup "One Piece"
 scrape lookup "鬼滅の刃"           # Japanese
 scrape lookup "외모지상주의"       # Korean
 scrape lookup "One Piece" --json  # JSON output
-scrape lookup "Akame ga KILL" --fuzzy  # handle typos like "Akame ga KIL"
 ```
 
-### Batch lookup from a file
-
-Text file (one title per line, `#` comments and blank lines ignored):
+### Batch lookup
 
 ```bash
-scrape batch titles.txt
-scrape batch titles.txt --fuzzy  # fuzzy match handles typos in input
-```
-
-CSV file (first column treated as title, header row skipped):
-
-```bash
-scrape batch titles.csv
-```
-
-With JSON output:
-
-```bash
-scrape batch titles.txt --json
+scrape batch titles.txt           # text file, one title per line
+scrape batch titles.csv           # CSV file, first column is title
+scrape batch titles.txt --json    # JSON output
+scrape batch titles.txt --local   # skip API, local DB only
+scrape batch titles.txt --diff    # show titles missing from DB
 ```
 
 Example `titles.txt`:
@@ -67,22 +54,22 @@ Naruto
 # This is a comment
 Bleach
 鬼滅の刃
-외모지상주의
-```
-
-### Backup the database
-
-```bash
-scrape backup ~/backups/scrape.db.gz        # specific file
-scrape backup ~/backups/                     # auto-timestamped filename
 ```
 
 ### Database maintenance
 
 ```bash
-scrape maintenance vacuum   # compact the database
-scrape maintenance check    # run integrity check
-scrape maintenance stats    # show record counts per table
+scrape maintenance vacuum         # compact the database
+scrape maintenance check          # integrity check
+scrape maintenance stats          # show record counts
+scrape maintenance normalize      # normalize all titles and rebuild index
+```
+
+### Backup
+
+```bash
+scrape backup ~/backups/          # auto-timestamped filename
+scrape backup ~/backups/scrape.db.gz
 ```
 
 ### Video game music (khinsider)
@@ -90,51 +77,6 @@ scrape maintenance stats    # show record counts per table
 ```bash
 scrape khinsider --url https://downloads.khinsider.com/game-soundtracks/album/... --mp3
 scrape khinsider --url https://downloads.khinsider.com/game-soundtracks/album/... --flac
-```
-
-### Version
-
-```bash
-scrape version
-```
-
-## Database
-
-The SQLite database is stored at `~/.config/scrape/scrape.db` (or the platform-equivalent config directory). It is created automatically on first use.
-
-### Tables
-
-| Table | Purpose |
-|-------|---------|
-| `manga` | Manga metadata from MangaDex (title, alt titles, author, status, cover) |
-| `observation` | Reading progress tracking (chapter, volume, episode) |
-| `bookmarks` | User bookmarks across all media types |
-| `anime` | Anime metadata (future) |
-| `lightnovel` | Light novel metadata (future) |
-| `webnovel` | Web novel metadata (future) |
-| `webtoons` | Webtoon metadata (future) |
-
-### Language Support
-
-MangaDex returns titles in multiple languages. The tool extracts and stores:
-
-| Code | Language |
-|------|----------|
-| `en` | English |
-| `ja` | Japanese (kanji/kana) |
-| `ja-ro` | Japanese (Hepburn/romaji) |
-| `ko` | Korean |
-| `zh` | Chinese (simplified) |
-| `zh-ro` | Chinese (romanized) |
-
-## Configuration
-
-All configuration lives in `~/.config/scrape/`:
-
-```
-~/.config/scrape/
-├── scrape.db      # SQLite database
-└── scrape.log     # Application log
 ```
 
 ## CLI Reference
@@ -146,24 +88,62 @@ scrape
 │   -v, --verbose      Show full details
 │   -l, --local        Only check local database
 │   --limit <n>        Max results to consider (default 5)
-│   --fuzzy [threshold] Enable fuzzy matching for typos (default 0.7)
 ├── batch <file>       Look up multiple titles from a file
 │   --json             Output in JSON format
 │   -v, --verbose      Show full details
 │   -l, --local        Only check local database
 │   --limit <n>        Max results per title (default 5)
-│   --fuzzy [threshold] Enable fuzzy matching for typos (default 0.7)
+│   --show-unmatched   Show titles not added to the DB
+│   --diff             Show input entries missing from DB (implies --local)
 ├── backup <dest>      Backup the database
 ├── maintenance        Database maintenance
 │   ├── vacuum         Compact the database
 │   ├── check          Integrity check
-│   └── stats          Show table record counts
+│   ├── stats          Show table record counts
+│   └── normalize      Normalize all titles and rebuild index
 ├── khinsider          Download video game OST
 │   --url <url>        Album URL
 │   --mp3              Download as MP3
 │   --flac             Download as FLAC
 └── version            Print version
 ```
+
+## Database
+
+SQLite database stored at `~/.config/scrape/scrape.db`, created automatically on first use.
+
+### Tables
+
+| Table | Purpose |
+|-------|---------|
+| `manga` | Manga metadata (title, alt titles, author, status, cover) |
+| `title_index` | Pre-computed normalized titles for O(log N) lookups |
+| `observation` | Reading progress tracking |
+| `bookmarks` | User bookmarks across all media types |
+| `anime` | Anime metadata (future) |
+| `lightnovel` | Light novel metadata (future) |
+| `webnovel` | Web novel metadata (future) |
+| `webtoons` | Webtoon metadata (future) |
+
+### Title normalization
+
+Titles are normalized for consistent matching:
+
+1. **Unicode folding** — confusable characters → ASCII equivalents
+2. **Grammar expansion** — "Dont" → "Do not", "Wont" → "Will not" (36 rules)
+3. **Separator folding** — periods, underscores, dashes → spaces
+4. **Noise removal** — edition markers, volume/chapter numbers, trailing years
+
+This ensures "Akame.ga.KILL!" and "Akame ga KILL!" match the same record.
+
+### Fuzzy matching
+
+When exact matching fails, the system uses a combined score:
+
+- **Token Jaccard** — word-level overlap (0.4 weight)
+- **Levenshtein** — character-level edit distance (0.6 weight)
+
+Threshold: 0.85 (single match auto-linked, multiple matches prompt for disambiguation).
 
 ## Development
 
@@ -173,35 +153,22 @@ go vet ./...           # static analysis
 go build .             # build binary
 ```
 
-### Project Structure
+### Project structure
 
 ```
 scrape/
 ├── commands/          CLI commands (cobra)
 ├── internal/
-│   ├── config/        Application paths and settings
+│   ├── config/        Application paths
 │   ├── database/      SQLite schema and queries
-│   ├── fuzzy/         Sorensen-Dice fuzzy string matching
 │   ├── mangadex/      MangaDex API client
-│   ├── normalize/     Title normalization
+│   ├── normalize/     Title normalization and fuzzy matching
+│   ├── pipeline/      Orchestration layer (lookup, batch, ingest)
 │   └── ratelimit/     Token bucket rate limiter
 ├── khinsider/         Video game music scraper
-├── openspec/specs/    OpenSpec capability specifications
+├── documentation/     Specs and architecture docs
 └── version/           Build version
 ```
-
-### Shared Library Policy
-
-All reusable functions live in `internal/` packages. No package may duplicate logic from a shared package. See `openspec/specs/shared-library/spec.md` for the full policy.
-
-## Acceptable Use
-
-This tool complies with the [MangaDex API acceptable use policy](https://api.mangadex.org/docs/2-limitations/):
-
-- Rate limited to 4 req/s (below the 5 req/s limit)
-- Sends a proper `User-Agent` header
-- No proxy or `Via` headers
-- No ads or paid services wrapping the API
 
 ## License
 
