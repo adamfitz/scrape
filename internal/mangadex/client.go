@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -99,6 +100,7 @@ func (c *Client) SearchManga(title string, limit int) ([]MangaResult, error) {
 	q.Set("includes[]", "cover_art")
 	u.RawQuery = q.Encode()
 
+	log.Printf("[mangadex] request url=%s", u.String())
 	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
@@ -107,6 +109,7 @@ func (c *Client) SearchManga(title string, limit int) ([]MangaResult, error) {
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		log.Printf("[mangadex] request failed err=%v", err)
 		return nil, fmt.Errorf("search %q: %w", title, err)
 	}
 	defer resp.Body.Close()
@@ -118,20 +121,24 @@ func (c *Client) SearchManga(title string, limit int) ([]MangaResult, error) {
 				retryAfter = v
 			}
 		}
+		log.Printf("[mangadex] rate limited, retrying after %ds", retryAfter)
 		time.Sleep(time.Duration(retryAfter) * time.Second)
 		return c.SearchManga(title, limit)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		log.Printf("[mangadex] API error status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
 		return nil, fmt.Errorf("mangadex API %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var sr searchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&sr); err != nil {
+		log.Printf("[mangadex] decode error err=%v", err)
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
+	log.Printf("[mangadex] response total=%d returned=%d", sr.Total, len(sr.Data))
 	return sr.Data, nil
 }
 

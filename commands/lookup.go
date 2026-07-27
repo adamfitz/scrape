@@ -34,7 +34,7 @@ func init() {
 	lookupCmd.Flags().BoolVar(&lookupJSON, "json", false, "Output results in JSON format")
 	lookupCmd.Flags().BoolVarP(&lookupVerbose, "verbose", "v", false, "Show full details (alt titles, author, cover, description)")
 	lookupCmd.Flags().BoolVarP(&lookupLocal, "local", "l", false, "Only check the local database, skip the API")
-	lookupCmd.Flags().IntVar(&lookupLimit, "limit", 5, "Max MangaDex results to consider")
+	lookupCmd.Flags().IntVar(&lookupLimit, "limit", 10, "Max MangaDex results to consider")
 }
 
 type lookupOutput struct {

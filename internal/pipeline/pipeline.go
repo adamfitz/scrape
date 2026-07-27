@@ -11,6 +11,7 @@ package pipeline
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/adamfitz/scrape/internal/database"
@@ -102,7 +103,7 @@ type LookupResult struct {
 // LookupOptions configures a lookup operation.
 type LookupOptions struct {
 	LocalOnly bool // skip API calls
-	Limit     int  // max API results to consider (default 5)
+	Limit     int  // max API results to consider (default 10)
 }
 
 // BatchLookupOptions configures a batch lookup operation.
@@ -303,6 +304,23 @@ func extractTitles(r mangadex.MangaResult) AltTitleData {
 	}
 }
 
+// extractTitle returns the first available title string for logging.
+func extractTitle(r mangadex.MangaResult) string {
+	for _, v := range r.Attributes.Title {
+		if v != "" {
+			return v
+		}
+	}
+	for _, alt := range r.Attributes.AltTitles {
+		for _, v := range alt {
+			if v != "" {
+				return v
+			}
+		}
+	}
+	return r.ID
+}
+
 // extractCandidate wraps a MangaDex result into a Candidate for user disambiguation.
 func extractCandidate(r mangadex.MangaResult, query string) Candidate {
 	titles := extractTitles(r)
@@ -325,6 +343,7 @@ func (p *Pipeline) ingestResult(mediaType database.MediaType, query string, r ma
 	b, _ := json.Marshal(titles)
 	title := TitleOrFallback(string(b), "en", query)
 
+	log.Printf("[ingest] title=%q source_id=%s", title, r.ID)
 	media := &database.Media{
 		Type:        mediaType,
 		Title:       title,
@@ -336,6 +355,7 @@ func (p *Pipeline) ingestResult(mediaType database.MediaType, query string, r ma
 		Description: r.Attributes.Description["en"],
 	}
 	if _, err := p.Ingest(media); err != nil {
+		log.Printf("[ingest] err=%v", err)
 		return nil, &PipelineError{Kind: ErrIngestFailed, Message: title, Err: err}
 	}
 	return &LookupResult{Media: media, Source: SourceAPI, Query: query}, nil
@@ -365,21 +385,29 @@ func (p *Pipeline) Lookup(mediaType database.MediaType, title string) (*database
 
 // LookupAPI performs a full lookup: local DB first, then MangaDex API.
 func (p *Pipeline) LookupAPI(mediaType database.MediaType, query string, opts LookupOptions) (*LookupResult, error) {
+	log.Printf("[lookup] query=%q local_only=%v", query, opts.LocalOnly)
+
 	media, err := p.Lookup(mediaType, query)
 	if err != nil {
 		return nil, err
 	}
 	if media != nil {
+		log.Printf("[lookup] tier1=exact title=%q", media.Title)
 		return &LookupResult{Media: media, Source: SourceDB, Query: query}, nil
 	}
+	log.Printf("[lookup] tier1=miss")
 
 	// Tier 2: Fuzzy scan against local DB
 	queryNorm := p.normaliser.MustNormalize(query)
 	fuzzyCandidates := p.fuzzyScan(mediaType, queryNorm, 0.85)
 	if len(fuzzyCandidates) == 1 {
+		log.Printf("[lookup] tier2=fuzzy_single title=%q score=%.2f", fuzzyCandidates[0].Title, fuzzyCandidates[0].Score)
 		return &LookupResult{Media: fuzzyCandidates[0].Media, Source: SourceFuzzy, Query: query}, nil
 	}
-	if len(fuzzyCandidates) > 1 {
+	if len(fuzzyCandidates) > 1 && opts.LocalOnly {
+		for _, fc := range fuzzyCandidates {
+			log.Printf("[lookup] tier2=fuzzy_candidate title=%q score=%.2f", fc.Title, fc.Score)
+		}
 		cands := make([]Candidate, len(fuzzyCandidates))
 		for i, fc := range fuzzyCandidates {
 			cands[i] = Candidate{
@@ -393,6 +421,7 @@ func (p *Pipeline) LookupAPI(mediaType database.MediaType, query string, opts Lo
 		}
 		return &LookupResult{Source: SourceFuzzy, Query: query, Candidates: cands}, nil
 	}
+	log.Printf("[lookup] tier2=fuzzy_miss count=%d", len(fuzzyCandidates))
 
 	if opts.LocalOnly {
 		return &LookupResult{Source: SourceDB, Query: query, Error: "not found locally"}, nil
@@ -406,26 +435,36 @@ func (p *Pipeline) LookupAPI(mediaType database.MediaType, query string, opts Lo
 	apiQuery := QueryForAPI(query)
 	limit := opts.Limit
 	if limit <= 0 {
-		limit = 5
+		limit = 10
 	}
 
+	log.Printf("[lookup] tier3=api_search query=%q limit=%d", apiQuery, limit)
 	results, err := client.SearchManga(apiQuery, limit)
 	if err != nil {
+		log.Printf("[lookup] tier3=api_error err=%v", err)
 		return nil, &PipelineError{Kind: ErrAPIFailed, Message: fmt.Sprintf("search %q", query), Err: err}
 	}
 
+	log.Printf("[lookup] tier3=api_results count=%d", len(results))
 	if len(results) == 0 {
 		return &LookupResult{Source: SourceAPI, Query: query, Error: "no results found on MangaDex"}, nil
+	}
+
+	for _, r := range results {
+		title := extractTitle(r)
+		log.Printf("[lookup] tier3=result id=%s title=%q", r.ID[:8], title)
 	}
 
 	var matches []mangadex.MangaResult
 	for _, r := range results {
 		if queryMatchesAnyTitle(apiQuery, r, p.normaliser) {
 			matches = append(matches, r)
+			log.Printf("[lookup] tier3=matched id=%s title=%q", r.ID[:8], extractTitle(r))
 		}
 	}
 
 	if len(matches) == 0 {
+		log.Printf("[lookup] tier3=no_match")
 		return &LookupResult{Source: SourceAPI, Query: query, Error: "no matching result on MangaDex"}, nil
 	}
 
