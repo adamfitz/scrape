@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 
 	"github.com/adamfitz/scrape/internal/database"
@@ -854,10 +855,15 @@ func TitleOrFallback(altTitleJSON, lang, fallback string) string {
 	if t, ok := data.Primary[lang]; ok && t != "" {
 		return t
 	}
-	for _, t := range data.Primary {
-		if t != "" {
-			return t
+	keys := make([]string, 0, len(data.Primary))
+	for k, v := range data.Primary {
+		if v != "" {
+			keys = append(keys, k)
 		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		return data.Primary[k]
 	}
 	return fallback
 }
