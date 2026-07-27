@@ -373,10 +373,32 @@ func (p *Pipeline) LookupAPI(mediaType database.MediaType, query string, opts Lo
 		return &LookupResult{Media: media, Source: SourceDB, Query: query}, nil
 	}
 
+	// Tier 2: Fuzzy scan against local DB
+	queryNorm := p.normaliser.MustNormalize(query)
+	fuzzyCandidates := p.fuzzyScan(mediaType, queryNorm, 0.85)
+	if len(fuzzyCandidates) == 1 {
+		return &LookupResult{Media: fuzzyCandidates[0].Media, Source: SourceFuzzy, Query: query}, nil
+	}
+	if len(fuzzyCandidates) > 1 {
+		cands := make([]Candidate, len(fuzzyCandidates))
+		for i, fc := range fuzzyCandidates {
+			cands[i] = Candidate{
+				Title:    fc.Title,
+				SourceID: fc.Media.SourceID,
+				Language: fc.Media.Language,
+				URL:      fc.Media.URL,
+				Status:   fc.Media.Status,
+				DescEn:   fc.Media.Description,
+			}
+		}
+		return &LookupResult{Source: SourceFuzzy, Query: query, Candidates: cands}, nil
+	}
+
 	if opts.LocalOnly {
 		return &LookupResult{Source: SourceDB, Query: query, Error: "not found locally"}, nil
 	}
 
+	// Tier 3: MangaDex API
 	rl := ratelimit.New(4)
 	defer rl.Stop()
 	client := mangadex.New(rl)

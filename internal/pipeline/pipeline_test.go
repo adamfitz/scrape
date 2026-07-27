@@ -376,6 +376,66 @@ func TestLookupAPI_CaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestLookupAPI_FuzzyFallback(t *testing.T) {
+	p := tempPipeline(t)
+
+	// Ingest with canonical form
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "Yuusha Party", SourceID: "fz1"})
+
+	// Query with typo — Tier 1 exact match fails, Tier 2 fuzzy should find it
+	result, err := p.LookupAPI(database.MediaTypeManga, "Yusha Party", pipeline.LookupOptions{LocalOnly: true})
+	if err != nil {
+		t.Fatalf("LookupAPI: %v", err)
+	}
+	if result.Media == nil {
+		t.Fatal("expected media from fuzzy match, got nil")
+	}
+	if result.Source != pipeline.SourceFuzzy {
+		t.Errorf("source = %q, want %q", result.Source, pipeline.SourceFuzzy)
+	}
+	if result.Media.Title != "Yuusha Party" {
+		t.Errorf("title = %q, want %q", result.Media.Title, "Yuusha Party")
+	}
+}
+
+func TestLookupAPI_FuzzyFallback_Apostrophe(t *testing.T) {
+	p := tempPipeline(t)
+
+	// Ingest title with apostrophe — normalization expands "You're" → "you are"
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "You're Under My Skin!", SourceID: "fz2"})
+
+	// Query with missing apostrophe — grammar expansion normalizes both to
+	// "you are under my skin", so Tier 1 exact match handles this correctly
+	result, err := p.LookupAPI(database.MediaTypeManga, "Youre under my Skin", pipeline.LookupOptions{LocalOnly: true})
+	if err != nil {
+		t.Fatalf("LookupAPI: %v", err)
+	}
+	if result.Media == nil {
+		t.Fatal("expected media, got nil")
+	}
+	if result.Source != pipeline.SourceDB {
+		t.Errorf("source = %q, want %q (grammar expansion handles apostrophe)", result.Source, pipeline.SourceDB)
+	}
+}
+
+func TestLookupAPI_FuzzyFallback_LocalOnly(t *testing.T) {
+	p := tempPipeline(t)
+
+	p.Ingest(&database.Media{Type: database.MediaTypeManga, Title: "Yuusha Party", SourceID: "fz2"})
+
+	// Fuzzy query with LocalOnly — should still return fuzzy match
+	result, err := p.LookupAPI(database.MediaTypeManga, "Yusha Party", pipeline.LookupOptions{LocalOnly: true})
+	if err != nil {
+		t.Fatalf("LookupAPI: %v", err)
+	}
+	if result.Media == nil {
+		t.Fatal("expected media from fuzzy match, got nil")
+	}
+	if result.Source != pipeline.SourceFuzzy {
+		t.Errorf("source = %q, want %q", result.Source, pipeline.SourceFuzzy)
+	}
+}
+
 func TestBatchLookupStream_LocalOnly(t *testing.T) {
 	p := tempPipeline(t)
 

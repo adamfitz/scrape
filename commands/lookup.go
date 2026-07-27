@@ -83,7 +83,7 @@ func handleDisambiguation(p *pipeline.Pipeline, result *pipeline.LookupResult, q
 	if lookupJSON {
 		c := result.Candidates[0]
 		return &pipeline.LookupResult{
-			Source: pipeline.SourceAPI,
+			Source: result.Source,
 			Query:  query,
 			Media: &database.Media{
 				Type:        database.MediaTypeManga,
@@ -96,11 +96,19 @@ func handleDisambiguation(p *pipeline.Pipeline, result *pipeline.LookupResult, q
 		}, nil
 	}
 
-	fmt.Printf("\nMultiple matches found:\n\n")
+	if result.Source == pipeline.SourceFuzzy {
+		fmt.Printf("\nMultiple local matches (fuzzy):\n\n")
+	} else {
+		fmt.Printf("\nMultiple matches found on MangaDex:\n\n")
+	}
 	for i, c := range result.Candidates {
 		fmt.Printf("  [%d] %s (%s) — %s\n", i+1, c.Title, c.Language, c.SourceID)
 	}
-	fmt.Printf("  [0] Skip (don't add)\n\n")
+	if result.Source == pipeline.SourceFuzzy {
+		fmt.Printf("  [0] Skip\n\n")
+	} else {
+		fmt.Printf("  [0] Skip (don't add)\n\n")
+	}
 	fmt.Print("Pick a number: ")
 
 	reader := bufio.NewReader(os.Stdin)
@@ -109,20 +117,36 @@ func handleDisambiguation(p *pipeline.Pipeline, result *pipeline.LookupResult, q
 	choice, err := strconv.Atoi(line)
 	if err != nil || choice < 0 || choice > len(result.Candidates) {
 		return &pipeline.LookupResult{
-			Source: pipeline.SourceAPI,
+			Source: result.Source,
 			Query:  query,
 			Error:  "invalid selection",
 		}, nil
 	}
 	if choice == 0 {
 		return &pipeline.LookupResult{
-			Source: pipeline.SourceAPI,
+			Source: result.Source,
 			Query:  query,
 			Error:  "skipped by user",
 		}, nil
 	}
 
 	c := result.Candidates[choice-1]
+
+	if result.Source == pipeline.SourceFuzzy {
+		return &pipeline.LookupResult{
+			Media: &database.Media{
+				Type:        database.MediaTypeManga,
+				Title:       c.Title,
+				SourceID:    c.SourceID,
+				URL:         c.URL,
+				Status:      c.Status,
+				Description: c.DescEn,
+			},
+			Source: result.Source,
+			Query:  query,
+		}, nil
+	}
+
 	media, err := p.IngestCandidate(database.MediaTypeManga, c)
 	if err != nil {
 		return nil, fmt.Errorf("ingest: %w", err)
@@ -130,7 +154,7 @@ func handleDisambiguation(p *pipeline.Pipeline, result *pipeline.LookupResult, q
 
 	return &pipeline.LookupResult{
 		Media:  media,
-		Source: pipeline.SourceAPI,
+		Source: result.Source,
 		Query:  query,
 	}, nil
 }
