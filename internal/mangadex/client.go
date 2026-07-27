@@ -97,7 +97,6 @@ func (c *Client) SearchManga(title string, limit int) ([]MangaResult, error) {
 	q.Set("limit", strconv.Itoa(limit))
 	q.Set("includes[]", "author")
 	q.Set("includes[]", "cover_art")
-	q.Set("order[relevance]", "desc")
 	u.RawQuery = q.Encode()
 
 	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
